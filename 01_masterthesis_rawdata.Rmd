@@ -14,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 if (!requireNamespace("pacman", quietly = TRUE)) {
   install.packages("pacman")
 }
+#f
 #gdgfdgfd
 pacman::p_load(
   fixest, haven, modelsummary, tidyverse, readxl, dplyr, plm, stargazer, IDPmisc, lfe, here, sandwich, AER, 
