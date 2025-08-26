@@ -1,0 +1,2097 @@
+---
+title: "masterthesis_regression"
+author: "Lê Minh Hoàng"
+date: "2024-08-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r cars}
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")
+}
+
+pacman::p_load(
+  fixest, haven, modelsummary, tidyverse, readxl, dplyr, plm, stargazer, IDPmisc, lfe, here, sandwich, AER, 
+  dynlm, forecast, scales, nlme, lmtest, pdynmc, dynpanel, rstudioapi, xtable, estimatr, zoo, skimr, rvest, 
+  exactextractr, sf, raster, geodata, stringr, parallel, osmdata, osmextract, wbstats, spatialreg, spData, 
+  spdep, leaflet, RColorBrewer, ncdf4, rnaturalearth, patchwork, WDI, httr, jsonlite, tidytext, lintr, 
+  pdftools, purrr, gt, kableExtra
+)
+```
+
+# Load the data
+## 50 by 50 grid
+```{r}
+grid_final_afg_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_afg_50.rds")
+grid_final_bgd_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_bgd_50.rds")
+grid_final_btn_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_btn_50.rds")
+grid_final_ind_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_ind_50.rds")
+# grid_final_ind_df  <- grid_final_ind_df %>%
+#   dplyr::select(-total_disbur, -log_disbur)
+grid_final_npl_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_npl_50.rds")
+grid_final_pak_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_pak_50.rds")
+grid_final_lka_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_lka_50.rds")
+
+# Afghanistan
+grid_final_afg_50_df <- grid_final_afg_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_afg"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_afg_50_df_1995 <- grid_final_afg_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Bangladesh
+grid_final_bgd_50_df <- grid_final_bgd_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_bgd"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_bgd_50_df_1995 <- grid_final_bgd_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Bhutan
+grid_final_btn_50_df <- grid_final_btn_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_btn"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_btn_50_df_1995 <- grid_final_btn_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# India
+grid_final_ind_50_df <- grid_final_ind_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_ind"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_ind_50_df_1995 <- grid_final_ind_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Nepal
+grid_final_npl_50_df <- grid_final_npl_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_npl"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_npl_50_df_1995 <- grid_final_npl_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Pakistan
+grid_final_pak_50_df <- grid_final_pak_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_pak"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_pak_50_df_1995 <- grid_final_pak_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Sri Lanka
+grid_final_lka_50_df <- grid_final_lka_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_lka"),
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_lka_50_df_1995 <- grid_final_lka_50_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# bind all of those dataframe together
+grid_final_south_asia_50_df_1995 <- bind_rows(
+  grid_final_afg_50_df_1995,
+  grid_final_bgd_50_df_1995,
+  grid_final_btn_50_df_1995,
+  grid_final_ind_50_df_1995,
+  grid_final_npl_50_df_1995,
+  grid_final_pak_50_df_1995,
+  grid_final_lka_50_df_1995
+)
+
+# add GID_0 to grid_final_south_asia_df based on the first three later in the value of GID_1
+grid_final_south_asia_50_df_1995 <- grid_final_south_asia_50_df_1995 %>%
+  mutate(GID_0 = substr(GID_1, 1, 3))
+
+summary(as.factor(grid_final_ind_50_df$GID_0))
+
+```
+
+
+## 25 by 25 grid
+```{r}
+grid_final_afg_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_afg_25.rds")
+grid_final_bgd_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_bgd_25.rds")
+grid_final_btn_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_btn_25.rds")
+grid_final_ind_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_ind_25.rds")
+# grid_final_ind_df  <- grid_final_ind_df %>%
+#   dplyr::select(-total_disbur, -log_disbur)
+grid_final_npl_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_npl_25.rds")
+grid_final_pak_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_pak_25.rds")
+grid_final_lka_25_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_lka_25.rds")
+
+# Afghanistan
+grid_final_afg_25_df <- grid_final_afg_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_afg"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_afg_25_df_1995 <- grid_final_afg_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Bangladesh
+grid_final_bgd_25_df <- grid_final_bgd_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_bgd"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_bgd_25_df_1995 <- grid_final_bgd_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Bhutan
+grid_final_btn_25_df <- grid_final_btn_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_btn"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_btn_25_df_1995 <- grid_final_btn_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# India
+grid_final_ind_25_df <- grid_final_ind_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_ind"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_ind_25_df_1995 <- grid_final_ind_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Nepal
+grid_final_npl_25_df <- grid_final_npl_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_npl"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_npl_25_df_1995 <- grid_final_npl_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Pakistan
+grid_final_pak_25_df <- grid_final_pak_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_pak"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_pak_25_df_1995 <- grid_final_pak_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# Sri Lanka
+grid_final_lka_25_df <- grid_final_lka_25_df %>%
+  mutate(grid_id = paste0(grid_id, "_lka"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+grid_final_lka_25_df_1995 <- grid_final_lka_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+
+# bind all of those dataframe together
+grid_final_south_asia_25_df_1995 <- bind_rows(
+  grid_final_afg_25_df_1995,
+  grid_final_bgd_25_df_1995,
+  grid_final_btn_25_df_1995,
+  grid_final_ind_25_df_1995,
+  grid_final_npl_25_df_1995,
+  grid_final_pak_25_df_1995,
+  grid_final_lka_25_df_1995
+)
+
+# add GID_0 to grid_final_south_asia_df based on the first three later in the value of GID_1
+grid_final_south_asia_25_df_1995 <- grid_final_south_asia_25_df_1995 %>%
+  mutate(GID_0 = substr(GID_1, 1, 3))
+
+summary(as.factor(grid_final_ind_25_df$GID_0))
+```
+## 10 by 10 grid
+```{r}
+grid_final_lka_10_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_lka_10.rds")
+```
+# Check
+check for the earliest year that conflict happens (conflicts_count > 0) for grid_final_pak_50_df
+check for the earliest year that conflict happens (conflicts_count > 0) for grid_final_pak_50_df
+```{r}
+# Convert year to numeric if it's a factor
+grid_final_pak_50_df <- grid_final_pak_50_df %>%
+  mutate(year = as.numeric(as.character(year)))
+
+# Filter for rows where conflicts_count > 0 and find the minimum year
+earliest_conflict_year <- grid_final_pak_50_df %>%
+  filter(project_location_count > 0) %>%
+  summarise(min_year = min(year, na.rm = TRUE))
+
+# Print the result
+print(earliest_conflict_year)
+```
+# Summary Statistics
+## old version
+```{r}
+modelsummary::datasummary_correlation(grid_final_ind_50_df_1995, title = "Correlation between variables")
+modelsummary::datasummary(All(grid_final_ind_50_df_1995) ~ mean + sd + min + median + max, fmt = 3, data = grid_final_ind_50_df_1995, title = "Summary Statistics")
+modelsummary::datasummary(All(grid_final_ind_25_df_1995) ~ mean + sd + min + median + max, fmt = 3, data = grid_final_ind_25_df_1995, title = "Summary Statistics")
+modelsummary::datasummary_skim(grid_final_ind_50_df_1995)
+    # Adding Q1 and Q3 as columns in a custom skim table
+datasummary_skim(
+  grid_final_df,
+  histogram = FALSE,
+  fmt = 3,
+  title = "Summary Statistics",
+  custom_skim_functions = list(
+    Q1 = ~ quantile(.x, probs = 0.25, na.rm = TRUE),
+    Q3 = ~ quantile(.x, probs = 0.75, na.rm = TRUE)
+  )
+)
+
+# some graphs
+# give me individual curves of each variable across time (year)
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = population)) + geom_line() + labs(title = "Population across time", x = "Year", y = "Population")
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = avg_prec)) + geom_line() + labs(title = "Average precipitation across time", x = "Year", y = "Average precipitation")
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = avg_temp)) + geom_line() + labs(title = "Average temperature across time", x = "Year", y = "Average temperature")
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = cropland_percentage)) + geom_line() + labs(title = "Cropland percentage across time", x = "Year", y = "Cropland percentage")
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = bws_raw)) + geom_line() + labs(title = "Baseline water stress across time", x = "Year", y = "Baseline water stress")
+ggplot(grid_final_ind_50_df_1995, aes(x = year, y = avg_project_duration)) + geom_line() + labs(title = "Average project duration across time", x = "Year", y = "Average project duration")
+```
+## newer version
+```{r}
+library(modelsummary)
+library(gt)
+
+desc_stat_ind <- grid_final_ind_50_df_1995 %>%
+  mutate(conflict_dummy = conflict_dummy * 100,
+         state_based_dummy = ifelse(state_based_count > 0, 100, 0),
+         non_state_dummy = ifelse(non_state_count > 0, 100, 0),
+         one_sided_dummy = ifelse(one_sided_count >0, 100, 0))
+# Generate summary statistics without n_unique
+summary_stats <- datasummary((conflict_dummy + state_based_dummy  + non_state_dummy + one_sided_dummy + log(best_death_count + 1)  + project_location_count + bws_cat + log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage) ~ 
+                            N + mean + P25 + P75 + sd + min + median + max, 
+                            fmt = 3, 
+                            data = desc_stat_ind, 
+                            output = "gt")
+
+# # Further formatting with gt, making N the first column
+# summary_stats_formatted <- summary_stats %>%
+#   tab_header(
+#     title = "Descriptive Statistics of Key Variables",
+#     subtitle = "Data from grid_final_ind_50_df_1995"
+#   ) %>%
+#   fmt_number(columns = c(mean, sd, min, median, max), decimals = 3) %>%
+#   fmt_number(columns = c(N), decimals = 0) %>%
+#   cols_label(
+#     N = "Obs",
+#     mean = "Mean",
+#     sd = "Std",
+#     min = "Min",
+#     median = "Median",
+#     max = "Max"
+#   ) %>%
+#   cols_move(columns = N, after = max) %>% # Move 'N' to the front
+#   cols_move(columns = c(mean, sd, min, median, max), after = N) %>%
+#   tab_spanner(
+#     label = "Descriptive Statistics",
+#     columns = c(N, mean, sd, min, median, max)
+#   ) %>%
+#   tab_style(
+#     style = list(
+#       cell_text(weight = "bold")
+#     ),
+#     locations = cells_column_labels(columns = everything())
+#   ) %>%
+#   tab_options(
+#     table.width = pct(100),
+#     column_labels.font.weight = "bold"
+#   )
+
+# Further formatting with gt, moving N to the front and including P25/P75
+summary_stats_formatted <- summary_stats %>%
+  tab_header(
+    title = "Descriptive Statistics of Key Variables",
+    subtitle = "Data from grid_final_ind_50_df_1995"
+  ) %>%
+  fmt_number(columns = c(mean, sd, min, P25, median, P75, max), decimals = 3) %>% # Format all numeric columns
+  fmt_number(columns = c(N), decimals = 0) %>% # Format N with no decimals
+  cols_label(
+    N = "Obs",
+    mean = "Mean",
+    sd = "Std",
+    min = "Min",
+    P25 = "1Q",      # First quartile
+    median = "Median",
+    P75 = "3Q",      # Third quartile
+    max = "Max"
+  ) %>%
+  cols_move(columns = N, after = max) %>% # Move 'Obs' to the front
+  cols_move(columns = c(mean, sd, min, P25, median, P75, max), after = N) %>% # Order: Mean, Std, Min, 1Q, Median, 3Q, Max
+  tab_spanner(
+    label = "Descriptive Statistics",
+    columns = c(N, mean, sd, min, P25, median, P75, max)
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold")
+    ),
+    locations = cells_column_labels(columns = everything())
+  ) %>%
+  tab_options(
+    table.width = pct(100),
+    column_labels.font.weight = "bold"
+  )
+
+summary_stats_formatted
+
+# Convert gt table to LaTeX
+latex_code <- as_latex(summary_stats_formatted)
+
+# Write the LaTeX code to a file
+gtsave(summary_stats_formatted, "./latex/descriptive_stats_from_gt.tex") # Save as LaTeX if needed
+```
+
+# Regressions
+
+## Regression 4review
+### FE grid_id + GID_2 + year
+```{r}
+# conflict_dummy
+grid_reg_feols_final_conflict_dummy <- feols(
+  conflict_dummy ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_conflict_dummy_updated <- feols(
+  conflict_dummy ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    log_pop +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+
+
+
+
+# conflict_count
+grid_reg_feols_final_conflicts_count <- feols(
+  conflicts_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_conflicts_count_updated <- feols(
+  conflicts_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+# death_count
+grid_reg_feols_final_death_count <- feols(
+  best_death_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_death_count_updated <- feols(
+  best_death_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+# stated_base_count: total of state-based conflict events
+grid_reg_feols_final_state_based_count <- feols(
+  state_based_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_state_based_count_updated <- feols(
+  state_based_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+# non-state_count: total of non-state conflict events
+grid_reg_feols_final_non_state_based_count <- feols(
+  non_state_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_non_state_based_count_updated <- feols(
+  non_state_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+# one-sided violence count: One-sided violence is the use of armed force by the government of a state or by a formally organized group against civilians which results in at least 25 deaths. Extrajudicial killings in custody are excluded
+grid_reg_feols_final_one_sided_count <- feols(
+  one_sided_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_one_sided_count_updated <- feols(
+  one_sided_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2 + year,
+  data = grid_final_df
+)
+
+
+# Report -----
+# conflict_dummy
+etable(grid_reg_feols_final_conflict_dummy, grid_reg_feols_final_conflict_dummy_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# conflict_count
+etable(grid_reg_feols_final_conflicts_count, grid_reg_feols_final_conflicts_count_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# best_death_count
+etable(grid_reg_feols_final_death_count, grid_reg_feols_final_death_count_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# state_based_count
+etable(grid_reg_feols_final_state_based_count, grid_reg_feols_final_state_based_count_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# non_state_count
+etable(grid_reg_feols_final_non_state_based_count, grid_reg_feols_final_non_state_based_count_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# one_sided_count
+etable(grid_reg_feols_final_one_sided_count, grid_reg_feols_final_one_sided_count_updated, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+
+```
+
+
+### FE grid_id + GID_2^year
+```{r}
+# conflict_dummy and project_location_dummy
+grid_reg_feols_final_conflict_dummy_location_dummy_fe2 <- feols(
+  conflict_dummy ~ project_location_dummy + bws_cat + i(
+    bws_cat,
+    project_location_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_conflict_dummy_location_dummy_updated_fe2 <- feols(
+  conflict_dummy ~ 
+    project_location_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    log_pop +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+# conflict_dummy
+grid_reg_feols_final_conflict_dummy_fe2 <- feols(
+  conflict_dummy ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_conflict_dummy_updated_fe2 <- feols(
+  conflict_dummy ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    log_pop +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+
+# conflict_count
+grid_reg_feols_final_conflicts_count_fe2 <- feols(
+  conflicts_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_conflicts_count_updated_fe2 <- feols(
+  conflicts_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+# death_count
+grid_reg_feols_final_death_count_fe2 <- feols(
+  best_death_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_death_count_updated_fe2 <- feols(
+  best_death_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+# stated_base_count: total of state-based conflict events
+grid_reg_feols_final_state_based_count_fe2 <- feols(
+  state_based_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp  + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_state_based_count_updated_fe2 <- feols(
+  state_based_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp + 
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+# non-state_count: total of non-state conflict events
+grid_reg_feols_final_non_state_based_count_fe2 <- feols(
+  non_state_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_non_state_based_count_updated_fe2 <- feols(
+  non_state_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+
+
+
+# one-sided violence count: One-sided violence is the use of armed force by the government of a state or by a formally organized group against civilians which results in at least 25 deaths. Extrajudicial killings in custody are excluded
+grid_reg_feols_final_one_sided_count_fe2 <- feols(
+  one_sided_count ~ project_location_type_dummy + bws_cat + i(
+    bws_cat,
+    project_location_type_dummy,
+    ref = 0,
+    ref2 = 0
+  ) + log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+grid_reg_feols_final_one_sided_count_updated_fe2 <- feols(
+  one_sided_count ~ 
+    project_location_type_dummy + 
+    bws_cat + 
+    i(bws_cat, project_location_type_dummy, ref = 0, ref2 = 0) + 
+    log_disbur + 
+    i(project_location_type_dummy, log_disbur, ref = 0) + 
+    log_gdp +
+    avg_temp + 
+    avg_prec + 
+    cropland_percentage |  grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+
+# Report -----
+# conflict_dummy and project_location_dummy
+etable(grid_reg_feols_final_conflict_dummy_location_dummy_fe2, grid_reg_feols_final_conflict_dummy_location_dummy_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# conflict_dummy
+etable(grid_reg_feols_final_conflict_dummy_fe2, grid_reg_feols_final_conflict_dummy_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# conflict_count
+etable(grid_reg_feols_final_conflicts_count_fe2, grid_reg_feols_final_conflicts_count_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# best_death_count
+etable(grid_reg_feols_final_death_count_fe2, grid_reg_feols_final_death_count_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# state_based_count
+etable(grid_reg_feols_final_state_based_count_fe2, grid_reg_feols_final_state_based_count_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# non_state_count THIS HAS THE MOST INTERSTING RESULT
+etable(grid_reg_feols_final_non_state_based_count_fe2, grid_reg_feols_final_non_state_based_count_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# one_sided_count
+etable(grid_reg_feols_final_one_sided_count_fe2, grid_reg_feols_final_one_sided_count_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+
+```
+### Comparison
+```{r}
+etable(grid_reg_feols_final_conflict_dummy, grid_reg_feols_final_conflict_dummy_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+etable(grid_reg_feols_final_conflict_dummy_updated, grid_reg_feols_final_conflict_dummy_updated_fe2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+## Second Review
+### project_location_count (take this)
+#### Default
+```{r}
+results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(state_based_count + 1),
+    log(non_state_count+1), 
+    log(one_sided_count + 1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )) +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+etable(results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+
+#### Updated (with disbursement)
+```{r}
+results_w_disbur <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )) + log_commi + 
+  project_location_count:log_commi +
+  log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+etable(results_w_disbur, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+
+### project_location_water_count
+#### Default
+```{r}
+results_pj_water <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_water_count) + csw0(i(
+    bws_cat,
+    (project_location_water_count),
+    ref = 0
+  )) +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_df
+)
+
+etable(results_pj_water, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+
+#### Updated (with financial ele)
+```{r}
+results_pj_water_w_disbur <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_water_count) + csw0(i(
+    bws_cat,
+    (project_location_water_count),
+    ref = 0,
+    ref2 = 0
+  )) + log_commi + 
+  project_location_water_count:log_commi +
+  log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_df
+)
+
+etable(results_pj_water_w_disbur, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+
+
+### project_location_type_dummy
+#### Default
+```{r}
+results_2 <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_type_dummy) + csw0(i(
+    bws_cat,
+    (project_location_type_dummy),
+    ref = 0,
+    ref2 = 0
+  )) +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_pop + log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_50_df_1995
+)
+
+etable(results_2, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Updated (with commitment)
+```{r}
+results_2_disbur <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_type_dummy) + csw0(i(
+    bws_cat,
+    (project_location_type_dummy),
+    ref = 0,
+    ref2 = 0
+  )) + log_commi +
+  i(project_location_type_dummy, log_commi, ref = 0)+
+  log_gdp + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_df
+)
+
+etable(results_2_disbur, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+```
+
+
+## Looking at all countries
+
+### 50km grid cell
+```{r}
+grid_final_afg_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_afg_50.rds")
+grid_final_bgd_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_bgd_50.rds")
+grid_final_btn_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_btn_50.rds")
+grid_final_ind_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_ind_50.rds")
+# grid_final_ind_df  <- grid_final_ind_df %>%
+#   dplyr::select(-total_disbur, -log_disbur)
+grid_final_npl_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_npl_50.rds")
+grid_final_pak_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_pak_50.rds")
+grid_final_lka_50_df <- read_rds("./Data/data-r4r/grid_df_incomplete_cells_lka_50.rds")
+
+# Afghanistan
+grid_final_afg_50_df <- grid_final_afg_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_afg"), 
+         GID_0 = substr(GID_1, 1, 3))
+
+# Bangladesh
+grid_final_bgd_50_df <- grid_final_bgd_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_bgd"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# Bhutan
+grid_final_btn_50_df <- grid_final_btn_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_btn"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# India
+grid_final_ind_50_df <- grid_final_ind_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_ind"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# Nepal
+grid_final_npl_50_df <- grid_final_npl_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_npl"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# Pakistan
+grid_final_pak_50_df <- grid_final_pak_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_pak"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# Sri Lanka
+grid_final_lka_50_df <- grid_final_lka_50_df %>%
+  mutate(grid_id = paste0(grid_id, "_lka"),
+         GID_0 = substr(GID_1, 1, 3))
+
+# bind all of those dataframe together
+grid_final_south_asia_50_df <- bind_rows(
+  grid_final_afg_50_df,
+  grid_final_bgd_50_df,
+  grid_final_btn_50_df,
+  grid_final_ind_50_df,
+  grid_final_npl_50_df,
+  grid_final_pak_50_df,
+  grid_final_lka_50_df
+)
+
+# add GID_0 to grid_final_south_asia_df based on the first three later in the value of GID_1
+grid_final_south_asia_50_df <- grid_final_south_asia_50_df %>%
+  mutate(GID_0 = substr(GID_1, 1, 3))
+
+summary(as.factor(grid_final_ind_50_df$GID_0))
+```
+
+country codes are c("AFG", "BGD", "BTN", "IND", "NPL", "PAK", "LKA")
+
+### Formula 
+$$
+P\{\text{Conflict}_{it} = 1\} = \beta_1 \text{WB\_Aid\_Var}_{it} + \beta_2 (\text{WB\_Aid\_Var}_{it} \times \text{Water\_Stress\_Var}_{i}) + \beta_3 X_{it} + \eta_{ij,t} + \tau_i + \epsilon_{it}
+$$
+
+
+
+
+#### South Asia in total
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ))  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year + GID_0,
+  data = grid_final_south_asia_50_df
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+       
+)
+```
+#### Afghanistan
+```{r}
+
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ) +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_50_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+       
+)
+
+```
+
+#### Bangladesh
+```{r}
+final_results <- feols(
+  c(conflict_dummy, 
+    (state_based_count > 0),
+    (non_state_count > 0),
+    (one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  ) +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_50_df_1995
+)
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Bhutan
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ))  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_btn_50_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### India
+```{r}
+
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_50_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# results_india <- feols(100*conflict_dummy ~ (project_location_count) + i(
+#     bws_cat,
+#     (project_location_count),
+#     ref = 0,
+#     ref2 = 0
+#   ) +
+#   log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+#   data = grid_final_ind_50_df_1995
+# )
+# 
+# etable(results_india,
+#        signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+#        cluster = ~grid_id
+# )
+```
+
+#### Nepal
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_50_df_1995
+)
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Pakistan
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  +  
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_50_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Sri Lanka
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ))  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_50_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+
+### Robustness check with 25 km grid
+#### South Asia in total
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ))  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year + GID_0,
+  data = grid_final_south_asia_25_df
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+       
+)
+```
+#### Afghanistan
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  + 
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_25_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+       
+)
+
+```
+
+#### Bangladesh
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  + 
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_25_df_1995
+)
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+       # tex = T,
+       # file = "./tables/results/final_results_bgd_25.tex"
+)
+```
+
+#### Bhutan
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count,
+    log(non_state_count+1)) ~ (project_location_count) + csw0(i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ))  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_btn_25_df
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### India
+```{r}
+grid_final_ind_25_df_1995 <- grid_final_ind_25_df %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  filter(year >= 1995)
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  ) + 
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_25_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Nepal
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  + 
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_25_df_1995
+)
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Pakistan
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  +  
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_25_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+#### Sri Lanka
+```{r}
+final_results <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1))~ (project_location_count) + i(
+    bws_cat,
+    (project_location_count),
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_25_df_1995
+)
+
+
+etable(final_results, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+```
+
+Recommendation
+
+    Use Model 2 if capturing regional time trends (GID_2-year) aligns with your research question, as it provides a more detailed and dynamic view.
+    Use Model 1 if computational efficiency is critical or if regional dynamics are believed to be relatively static over time.
+    
+# Final regression for thesis
+## Set rule for postprocess (latex)
+```{r}
+postprocess_depvar <- function(x) {
+  process_name <- function(name) {
+    name <- sub("^\\s*\\d+\\*", "", name)
+    name <- sub("^\\s*I\\(([^>]+)>0\\)", "\\1", name)
+    if (grepl("^\\s*log\\(([^)]+)\\+1\\)", name)) {
+      name <- sub("^\\s*log\\(([^)]+)\\+1\\)", "Log of \\1", name)
+    }
+    name <- gsub("\\\\_", " ", name)
+    name <- gsub("\\b(\\w)", "\\U\\1", name, perl = TRUE)
+    return(trimws(name))
+  }
+  
+  for (i in seq_along(x)) {
+    if (grepl("^\\s*Dependent Variable[s]?:", x[i])) {
+      row <- sub("\\\\\\s*$", "", x[i])
+      cols <- strsplit(row, "&")[[1]]
+      for (j in 2:length(cols)) {
+        orig_name <- trimws(cols[j])
+        if (nchar(orig_name) > 0) {
+          cols[j] <- process_name(orig_name)
+        }
+      }
+      x[i] <- paste(cols, collapse = "&")
+      x[i] <- paste0(x[i], "\\\\")
+    }
+    
+    if (grepl("^\\s*grid\\\\_id\\s*&", x[i])) {
+      x[i] <- sub("^\\s*grid\\\\_id\\s*&", "Grid Cell &", x[i])
+    }
+    if (grepl("^\\s*GID\\\\_2-year\\s*&", x[i])) {
+      x[i] <- sub("^\\s*GID\\\\_2-year\\s*&", "Subdistrict * Year &", x[i])
+    }
+    
+    if (grepl("^\\\\begin\\{tabular\\}", x[i])) {
+      x[i] <- paste("\\small", x[i], sep = "\n")
+    }
+  }
+  return(x)
+}
+
+# Define a dictionary for renaming variables
+fixest::setFixest_dict(c(
+  project_location_count = "Project Location Count",
+  "log_gdp" = "Log GDP",
+  "log_pop" = "Log Population",
+  "avg_temp" = "Average Temperature",
+  "avg_prec" = "Average Precipitation",
+  "cropland_percentage" = "Cropland Percentage",
+  "bws_cat::1" = "Water Stress Level 1",
+  "bws_cat::2" = "Water Stress Level 2",
+  "bws_cat::3" = "Water Stress Level 3",
+  "bws_cat::4" = "Water Stress Level 4"
+))
+```
+
+## India
+### 50 km
+```{r}
+final_results_india <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_50_df_1995
+)
+
+etable(final_results_india, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_ind_50_rotated.tex"
+)
+
+results_india_main <- feols(100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_50_df_1995
+)
+
+
+
+etable_results_india_main <- etable(results_india_main, 
+                               signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+                               tex = TRUE,
+                               cluster = ~grid_id,
+                               postprocess.tex = postprocess_depvar,
+                               file = "./latex/reg_ind_50_conflict_dummy.tex")
+
+results_india_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0), 
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_50_df_1995
+)
+
+etable_results_india_aux <- etable(results_india_aux, 
+                               signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+                               tex = TRUE,
+                               cluster = ~grid_id,
+                               postprocess.tex = postprocess_depvar,
+                               file = "./latex/reg_ind_50_aux.tex")
+
+```
+
+### 25 km
+```{r}
+final_results_india_25 <- feols(
+  c(100*conflict_dummy, 
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0),
+    best_death_count, log(best_death_count + 1), log(conflicts_count + 1),
+    log(state_based_count+1), log(non_state_count + 1), log(one_sided_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_25_df_1995
+)
+
+etable(final_results_india_25, 
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id
+)
+
+# Define a dictionary for renaming variables
+fixest::setFixest_dict(c(
+  project_location_count = "Project Location Count",
+  "log_gdp" = "Log GDP",
+  "log_pop" = "Log Population",
+  "avg_temp" = "Average Temperature",
+  "avg_prec" = "Average Precipitation",
+  "cropland_percentage" = "Cropland Percentage",
+  "bws_cat::1" = "Water Stress Level 1",
+  "bws_cat::2" = "Water Stress Level 2",
+  "bws_cat::3" = "Water Stress Level 3",
+  "bws_cat::4" = "Water Stress Level 4"
+))
+
+results_india_25_main <- feols(100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_25_df_1995
+)
+
+
+
+etable_results_india_25_main <- etable(results_india_25_main, 
+                               signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+                               tex = TRUE,
+                               cluster = ~grid_id,
+                               postprocess.tex = postprocess_depvar,
+                               file = "./latex/reg_ind_50_conflict_dummy.tex")
+
+results_india_25_aux <- feols(
+  c(100*conflict_dummy,
+    100*I(state_based_count > 0),
+    100*I(non_state_count > 0),
+    100*I(one_sided_count > 0), 
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_ind_25_df_1995
+)
+
+etable_results_india_25_aux <- etable(results_india_25_aux, 
+                               signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+                               tex = TRUE,
+                               cluster = ~grid_id,
+                               postprocess.tex = postprocess_depvar,
+                               file = "./latex/reg_ind_25_aux.tex")
+```
+## External validity
+### 50 km
+```{r}
+final_result_afg_conflict_dumm <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_50_df_1995
+)
+
+final_result_bgd_conflict_dumm <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_50_df_1995
+)
+
+final_result_npl_conflict_dumm <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_50_df_1995
+)
+
+final_result_pak_conflict_dumm <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_50_df_1995
+)
+
+etable(final_result_afg_conflict_dumm,
+       final_result_bgd_conflict_dumm,
+       final_result_npl_conflict_dumm,
+       final_result_pak_conflict_dumm,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_conflict_dummy.tex"
+)
+```
+#### Auxiliary depndent variables
+##### Afghanistan
+```{r}
+final_result_afg_50_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_50_df_1995
+)
+
+etable(final_result_afg_aux,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_afg_aux.tex"
+)
+```
+
+##### Bangladesh
+```{r}
+final_result_bgd_50_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_50_df_1995
+)
+
+etable(final_result_bgd_50_aux,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_bgd_aux.tex"
+)
+```
+
+##### Nepal
+```{r}
+final_result_npl_50_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_50_df_1995
+)
+
+etable(final_result_npl_50_aux,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_npl_aux.tex"
+)
+```
+
+##### Pakistan
+```{r}
+final_result_pak_50_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_50_df_1995
+)
+
+etable(final_result_pak_50_aux,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_pak_aux.tex"
+)
+```
+
+##### Sri Lanka
+```{r}
+final_result_lka_50_aux <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_50_df_1995
+)
+
+etable(final_result_lka_50_aux,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_50_lka_aux.tex"
+)
+```
+### 25 km 
+#### Conflict dummy
+```{r}
+final_result_afg_conflict_dumm_25 <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_25_df_1995
+)
+
+final_result_bgd_conflict_dumm_25 <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_25_df_1995
+)
+
+final_result_npl_conflict_dumm_25 <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_25_df_1995
+)
+
+final_result_pak_conflict_dumm_25 <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_25_df_1995
+)
+
+final_result_lka_conflict_dumm_25 <- feols(
+  100*conflict_dummy ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_25_df_1995
+)
+
+etable(final_result_afg_conflict_dumm_25,
+       final_result_bgd_conflict_dumm_25,
+       final_result_npl_conflict_dumm_25,
+       final_result_pak_conflict_dumm_25,
+       final_result_lka_conflict_dumm_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_conflict_dummy.tex"
+)
+
+
+```
+#### Auxiliary depndent variables
+##### Afghanistan
+```{r}
+final_result_afg_aux_25 <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_afg_25_df_1995
+)
+
+etable(final_result_afg_aux_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_afg_aux.tex"
+)
+```
+
+##### Bangladesh
+```{r}
+final_result_bgd_aux_25 <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_bgd_25_df_1995
+)
+
+etable(final_result_bgd_aux_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_bgd_aux.tex"
+)
+```
+
+##### Nepal
+```{r}
+final_result_npl_aux_25 <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_npl_25_df_1995
+)
+
+etable(final_result_npl_aux_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_npl_aux.tex"
+)
+```
+
+##### Pakistan
+```{r}
+final_result_pak_aux_25 <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_pak_25_df_1995
+)
+
+etable(final_result_pak_aux_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_pak_aux.tex"
+)
+```
+
+##### Sri Lanka
+```{r}
+final_result_lka_aux_25 <- feols(
+  c(100*I(state_based_count > 0),
+    100*I(one_sided_count > 0),
+    100*I(non_state_count > 0),
+    log(best_death_count + 1)) ~ project_location_count + i(
+    bws_cat,
+    project_location_count,
+    ref = 0,
+    ref2 = 0
+  )  +
+  #i(project_location_water_dummy, project_location_count, ref = 0)+
+  log_gdp + log_pop + avg_temp + avg_prec + cropland_percentage | grid_id + GID_2^year,
+  data = grid_final_lka_25_df_1995
+)
+
+etable(final_result_lka_aux_25,
+       signif.code = c("***" = 0.01, "**" = 0.05, "*" = 0.1, "." = 0.2),
+       cluster = ~grid_id,
+       tex = T,
+       postprocess.tex = postprocess_depvar,
+       file = "./latex/reg_exte_valu_25_lka_aux.tex"
+)
+```
+# Saving the environement
+```{r pressure, echo=FALSE}
+base::save.image(file = "./streamlined_v2.RData")
+```

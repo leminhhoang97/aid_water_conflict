@@ -1,0 +1,1960 @@
+---
+title: "masterthesis_grid_datawork"
+author: "Lê Minh Hoàng"
+date: "2024-08-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Package
+```{r}
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")
+}
+
+pacman::p_load(
+  fixest, haven, modelsummary, tidyverse, readxl, dplyr, plm, stargazer, IDPmisc, lfe, here, sandwich, AER, 
+  dynlm, forecast, scales, nlme, lmtest, pdynmc, dynpanel, rstudioapi, xtable, estimatr, zoo, skimr, rvest, 
+  exactextractr, sf, raster, geodata, stringr, parallel, osmdata, osmextract, wbstats, spatialreg, spData, 
+  spdep, leaflet, RColorBrewer, ncdf4, rnaturalearth, patchwork, WDI, httr, jsonlite, tidytext, lintr, 
+  pdftools, purrr, future.apply, raster, gt, summarytools
+)
+```
+
+
+
+
+# Unit of study
+Strategy
+
+country map
+```{r}
+# Remove internal borders between different multipolygons
+country_gid_0_sf_without_border <- st_union(country_gid_0_sf)
+
+# Transform the result back into an sf object, keeping attributes
+country_gid_0_sf_without_border <- st_sf(geometry = country_gid_0_sf_without_border)
+
+# create a column call GID and fill it with country_code_3_letter
+country_gid_0_sf_without_border$GID_0 <- country_code_3_letter
+
+# Visualize country_gid_0_sf and color each different multipolygon
+ggplot() +
+  geom_sf(data = country_gid_2_sf) +
+  theme_minimal() +
+  ggtitle("Visualization of GID_2")
+
+# visualize country_gid_0_sf_without_border
+ggplot() +
+  geom_sf(data = country_gid_0_sf_without_border, fill = "lightblue", color = "black") +
+  theme_minimal() +
+  ggtitle("Visualization of GID_0")
+
+```
+
+
+
+## 1. Make grid
+```{r}
+# Transform to a suitable CRS (e.g., Albers Equal-Area Conic)
+country_sf_proj <- st_transform(country_gid_0_sf_without_border, crs = 3035)  # EPSG:3035 (Europe Albers Equal-Area Conic)
+
+# Get the bounding box
+bbox <- st_bbox(country_sf_proj)
+
+# Define the grid size in meters (50 km)
+grid_size <- 50000
+
+# Create the grid
+grid <- st_make_grid(country_sf_proj, cellsize = c(grid_size, grid_size), what = "polygons")
+
+# Convert the grid to an sf object
+grid_sf <- st_sf(geometry = st_sfc(grid))
+
+# # adding the area 
+# grid_sf$area_grid <- st_area(grid_sf)
+
+# Transform the grid back to the original CRS
+grid_sf_original_crs <- st_transform(grid_sf, crs = st_crs(country_gid_0_sf_without_border))
+
+# give it the grid_id
+grid_sf_original_crs$grid_id <- 1:nrow(grid_sf_original_crs)
+
+# Plot the results
+ggplot() +
+  geom_sf(data = country_gid_0_sf, fill = "lightblue", color = "black") +
+  geom_sf(data = grid_sf_original_crs, fill = NA, color = "red", linetype = "dashed") +
+  theme_minimal()
+
+```
+
+
+## 2. Create centroids
+```{r}
+# Create centroids for each grid cell
+grid_centroids <- st_centroid(grid_sf_original_crs)
+
+```
+
+## 3. Match centroids with ADM-X using st_join / st_contains
+```{r}
+# Ensure both objects have the same CRS before joining
+grid_centroids <- st_transform(grid_centroids, st_crs(country_gid_0_sf))
+
+# Match centroids with ADM-X using st_join
+# Perform the join again after adjusting precision
+grid_centroids_adm <- st_join(grid_centroids, country_gid_0_sf, join = st_within)
+
+# Visualize the results
+# Plot the centroids and the administrative boundaries to verify their overlap
+ggplot() +
+  geom_sf(data = country_gid_0_sf_without_border, fill = "lightblue", color = "black") +
+  geom_sf(data = grid_centroids, color = "red", size = 0.5) +
+  theme_minimal() +
+  ggtitle("Visualization of Centroids and Administrative Boundaries")
+
+```
+
+## 4. Filter grid
+filter the grid that have the centroids (from grid_centroids_adm) being inside country_gid_0_sf
+```{r}
+# Filter the grid to only include those with centroids inside country
+grid_sf_filtered <- grid_centroids_adm %>%
+  filter(!is.na(GID_0))  # Remove rows with NA values in the GID_0 column
+
+# subset the grid_sf_original_crs with the grid_id in grid_sf_filtered
+grid_sf_original_crs_filtered <- grid_sf_original_crs[grid_sf_original_crs$grid_id %in% grid_sf_filtered$grid_id,]
+
+# Visualize the grid_sf_original_crs_filtered
+grid_country_graph <- ggplot() +
+  geom_sf(data = country_gid_0_sf_without_border, fill = "lightblue", color = "black") +
+  geom_sf(data = grid_sf_original_crs_filtered, aes(color = "50 by 50 km grid cell"), fill = NA, linetype = "solid") +
+  scale_color_manual(values = c("50 by 50 km grid cell" = "red"), name = "Grid") +
+  theme_minimal() + 
+  theme(plot.margin = margin(0, 0, 0, 0))
+grid_country_graph
+# Optional: Add coord_sf to remove padding around map boundaries
+# If your data spans a specific range (e.g., 65°E to 95°E, 10°N to 35°N as in prior examples)
+# grid_country_graph <- grid_country_graph + coord_sf(xlim = c(65, 95), ylim = c(10, 35), expand = FALSE)
+
+# Save with specific dimensions to match the plot content
+ggsave("./figures/grid_country_graph.pdf", 
+       plot = grid_country_graph,
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = "retina")
+```
+
+the grid_id in the grid_sf_filtered is used for identifying the grid with the centroids being inside the border of country, so we can filter it from the original grid_sf_original_crs
+
+```{r}
+# Ensure both datasets have the same CRS
+grid_sf_original_crs_filtered <- st_transform(grid_sf_original_crs_filtered, st_crs(country_gid_0_sf_without_border))
+
+# Use st_join with st_within to filter grids that are fully inside the country boundary
+grids_within_country <- st_join(grid_sf_original_crs_filtered, country_gid_0_sf_without_border, join = st_within)
+
+# Filter out grids that have NA values in the columns from country_gid_0_sf_without_border
+# Replace "GID_0" with the appropriate column from country_gid_0_sf_without_border if different
+grids_fully_within_country <- grids_within_country[!is.na(grids_within_country$GID_0), ]
+
+# extracting centroids information from those grids
+centroids_w_incomplete <- st_centroid(grid_sf_original_crs_filtered)
+centroids_fully_within <- st_centroid(grids_fully_within_country)
+
+# determine their GID_2 information
+centroids_w_incomplete_adm <- st_join(centroids_w_incomplete, country_gid_2_sf, join = st_within)
+centroids_fully_within_adm <- st_join(centroids_fully_within, country_gid_2_sf, join = st_within)
+
+# add the GID_2 back to the 2 grids dataframe
+grid_sf_incomplete_cells <- merge(grid_sf_original_crs_filtered, subset(sf::st_drop_geometry(centroids_w_incomplete_adm), select = c("grid_id", "GID_2", "GID_1")), by = "grid_id")
+grids_fully_within_country <- merge(grids_fully_within_country, subset(sf::st_drop_geometry(centroids_fully_within_adm), select = c("grid_id", "GID_2", "GID_1")), by = "grid_id")
+
+
+# Visualize grids_fully_within_country
+ggplot() +
+  geom_sf(data = country_gid_0_sf_without_border, fill = "lightblue", color = "black") +
+  geom_sf(data = grid_sf_incomplete_cells, fill = NA, color = "red", linetype = "solid") +
+  # add the conflict geo_event_ucdp_country_sf
+  geom_sf(data = geo_event_ucdp_country_sf, fill = "blue", color = "black", size = 0.5) +
+  # give the title
+  ggtitle("Visualization of Grids and Conflict Data") +
+  theme_minimal()
+```
+
+
+
+Comments: it seems that by calculating the area of the both ways of calculating the grid, the new  way offers the exact grid of 50 * 50 km by having the area of each grid is 2.5 * 10^9 square meter
+
+country_sf is now having the grid of 50 * 50 km
+
+correct way, getting the grid at exact 50 by 50 km
+
+For code review: THIS IS THE START OF THE DATA EXTRACTION AND MANIPULATION
+Load the data, I will create two final grid data frame, one based on the one with incomplete cells, one based on the one with only complete cells
+- do it for the incomplete cell grids first, then the complete cell grids is created by just removing the incomplete cells
+
+# Load the base grid
+```{r}
+country_sf <- grid_sf_incomplete_cells # including the grids with incomplete cells, more obs, 1267 obs
+# country_sf <- grids_fully_within_country # including the grids with complete cells - less obs, 1080 obs
+```
+
+# Precipitation Data
+https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/fews/web/global/monthly/chirps/final/downloads/monthly/
+```{r}
+# Create an empty data frame to store merged data
+agg_prec_grid <- data.frame()
+
+# List all precipitation files
+files <- list.files("./Data/data-raw/chirps/", pattern = ".tif$", full.names = TRUE)
+
+# Loop through each precipitation file
+for (f in files) {
+  # Read the raster file
+  raster <- terra::rast(f)
+  raster <- terra::project(raster, crs(country_sf))
+
+  # Extract year and month from the file name
+  year <- str_sub(f, -11, -8)
+  month <- str_sub(f, -6, -5)
+
+  # Extract precipitation data for country while ignoring -9999 values
+  prec_data <- exact_extract(raster, country_sf, fun = function(values, coverage_fraction) {
+    mean(values[values != -9999], na.rm = TRUE)
+  })
+
+
+  # Create a temporary data frame with precipitation data
+  temp_data <- data.frame(
+    year = year,
+    month = month,
+    prec = prec_data,
+    grid_id = country_sf$grid_id  # Assuming grid_id is the common identifier for regions in country_sf
+  )
+
+  # Append temporary data to the merged_data data frame
+  agg_prec_grid <- rbind(agg_prec_grid, temp_data)
+}
+
+```
+### Annually
+```{r pressure, echo = F}
+
+# Filter data between 1981 and 2019
+prec_1989_2020 <- agg_prec_grid %>%
+  filter(year >= 1989 & year <= 2020) %>%
+  mutate(year = as.numeric(year))
+
+# Calculate the average monthly precipitation for each grid_id and month
+avg_yearly_prec_long <- prec_1989_2020 %>%
+  group_by(grid_id, year) %>%        # Group by grid cell and month
+  summarize(avg_prec = mean(prec, na.rm = TRUE))  # Calculate the mean precipitation for each month
+
+agg_yearly_prec_wide <- avg_yearly_prec_long %>%
+  pivot_wider(
+    names_from = year, 
+    values_from = avg_prec, 
+    names_prefix = "avg_prec_"
+  )
+
+```
+## Check
+```{r}
+# # return the row in which avg_prec in grid_final_df is NA
+# na_grid_ids <- grid_final_df %>%
+#   group_by(grid_id) %>%                          # Ungroup the data frame
+#   as.data.frame() %>%                   # Convert to a regular data frame
+#   dplyr::filter(is.na(grid_final_df$avg_prec))         # Select only the grid_id column
+
+```
+
+# Population
+
+## Count
+
+https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-count-rev11
+
+```{r}
+
+pop_count_folder_path <- "./Data/data-raw/pop/count"
+
+# List all tif files in the folder
+pop_count_tif_files <- list.files(pop_count_folder_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Initialize an empty master dataset
+pop_count_grid_df <- data.frame(grid_id = country_sf$grid_id)
+
+# Loop through each tif file
+for (file in pop_count_tif_files) {
+  # Extract cropland year from file name
+  pop_year <- gsub(".*_(\\d{4})_.*", "\\1", basename(file))
+
+  # Load raster
+  raster <- terra::rast(file)
+
+  # Extract crop production data for country
+  pop <- exact_extract(raster, country_sf, fun = "mean")
+
+  # Add crop production data to master dataset
+  pop_count_grid_df[[paste0("pop_", pop_year)]] <- pop
+}
+
+```
+
+
+## Check
+```{r}
+# summary(pop_count_grid_df)
+
+```
+Taking the count data frame (pop_count_grid_df)
+
+why they are the same
+
+## Extrapolation
+
+Based on the prediction of UN
+https://population.un.org/wpp/
+https://population.un.org/dataportal/home?df=a71e698c-90d6-4200-bdee-31015d1bf53f
+
+This is from ChatGPT, changing from the variation of 0.03 to the decreasing rate of population reflected in the data of UN
+
+The image (cropped image of the UN historic population growth data) shows a graph of country’s historical population (upper chart) and annual growth rate (lower chart) from 1950 to 2020. Here are some key observations:
+    Population Growth (Upper Chart):
+        The population exhibits a smooth, steady increase from around 350 million in 1950 to over 1.3 billion in 2020.
+        The curve is consistently upward but with gradual flattening, suggesting slowing growth in the later years.
+
+    Annual Growth Rate (Lower Chart):
+        The growth rate fluctuated between 2% and 2.5% until around 1990.
+        After 1990, the growth rate steadily declined, falling to below 1.5% by 2020.
+        This decrease indicates a slowing in population growth, reflecting demographic transitions such as reduced birth rates.
+
+Implications for the Population Extrapolation (1989-1999)
+
+Based on this data:
+
+    Slowing Growth from 1990-1999: The growth rate steadily decreases over this period, which suggests that linear interpolation may overestimate population growth for these years.
+    Instead of applying a flat variation factor of ±3%, you could model the growth rate more explicitly for the period 1989-1999.
+    
+```{r}
+# Function to apply decreasing growth rate for the years 1989 to 1999
+apply_decreasing_growth_rate <- function(pop_2000, growth_rates) {
+  population <- numeric(length(growth_rates) + 1)  # Adjust for the year 2000
+  population[length(population)] <- pop_2000  # Population in the year 2000
+  
+  # Apply growth rates backward to extrapolate population for 1989 to 1999
+  for (i in seq_along(growth_rates)) {
+    population[length(population) - i] <- population[length(population) - i + 1] / (1 + growth_rates[i])
+  }
+  
+  return(population)
+}
+
+# Define the years we are interpolating/extrapolating for
+years <- 1989:2020
+
+# Define a decreasing growth rate from 1989 to 1999 based on the historical trend shown in the graph
+# load it from the UN data
+growth_rate_un_south_asia <- read.csv("./Data/data-raw/pop/pop_growth_rate_south_asia.csv") 
+
+# lower the case of the column names
+names(growth_rate_un_south_asia) <- tolower(names(growth_rate_un_south_asia))
+
+# dividing the pop_growth by 100 to get the growth rate in ratio
+growth_rate_un_south_asia$pop_growth <- growth_rate_un_south_asia$pop_growth/100
+
+# extract the growth rate of the country from the dataset, the 3 code country is iso3 and convert it to a list
+growth_rates_1989_1999 <- growth_rate_un_south_asia %>%
+  filter(iso3 == country_code_3_letter & time >= 1989 & time <= 1999) %>%
+  pull(pop_growth) %>%  # Extracts the column as a vector
+  as.numeric()  # Ensures it's stored as a numeric vector
+growth_rates_1989_1999
+
+# Apply the interpolation with decreasing growth rates for each grid
+result_list <- lapply(seq_len(nrow(pop_count_grid_df)), function(i) {
+  grid_data <- pop_count_grid_df[i, ]
+  
+  # Known population data and corresponding years
+  pop_values <- c(grid_data$pop_2000, grid_data$pop_2005, grid_data$pop_2010, grid_data$pop_2015, grid_data$pop_2020)
+  years_known <- c(2000, 2005, 2010, 2015, 2020)
+  
+  # Extrapolate for 1989-1999 using the decreasing growth rates
+  pop_1989_1999 <- apply_decreasing_growth_rate(grid_data$pop_2000, growth_rates_1989_1999)
+  
+  # Interpolate for the years after 2000 using linear interpolation
+  interpolated_pop <- approx(x = years_known, y = pop_values, xout = years, rule = 2)$y
+  
+  # Insert the extrapolated population for 1989-1999 into the final population data
+  interpolated_pop[1:length(pop_1989_1999)] <- pop_1989_1999
+  
+  # Create a dataframe for the interpolated data
+  result_df <- data.frame(grid_id = grid_data$grid_id, year = years, population = interpolated_pop)
+  
+  return(result_df)
+})
+
+# Combine all results into a single dataframe
+interpolated_pop_long_grid_df <- bind_rows(result_list)
+
+```
+
+
+# Temperature
+source: https://crudata.uea.ac.uk/cru/data/hrg/cru_ts_4.07/ge/
+
+Avg temp monthly (1901-now)
+### Average in total
+```{r}
+
+# Load temp
+nc_data <- "./Data/data-raw/temperature/correct temp/cru_ts4.07.1901.2022.tmp.dat.nc"
+
+# Open the NetCDF file
+nc <- nc_open(nc_data)
+
+# Print information about the NetCDF file
+print(nc)
+
+# Optionally, print information about dimensions and variables
+cat("Dimensions:", names(nc$dim), "\n")
+cat("Variables:", names(nc$var), "\n")
+
+## read raster data ------------------------------------------------------------
+rast <- terra::rast(nc_data, subds = "tmp")
+## Crop to Africa extent and extract data --------------------------------------
+range <- 1:1464
+
+# Proposed solution by ChatGPT
+out <- lapply(range, function(i) {
+  raster <- rast[[i]]
+  raster <- terra::crop(raster, country_sf)
+  
+  # Extract the date from raster metadata, if available
+  raster_date <- time(raster)  # Use appropriate function based on how your time data is stored
+
+  country_sf %>%
+    mutate(
+      temp_mean = exactextractr::exact_extract(raster, country_sf, fun = 'mean'),
+      date = as_datetime(raster_date)  # Ensure raster_date is converted to datetime if needed
+    ) %>%
+    st_drop_geometry()
+})
+
+## Bid rows -----------------------------------------------------------
+out <- out %>%
+  bind_rows()
+
+# just checking
+out_1 <- out %>%
+  filter(temp_mean<0)
+
+## Save data as csv -------------------------------------------
+# write_csv(out,"./Data/data-processed/tmp_grid_incomplet_cells.csv.gz")
+
+# temp_data <- read_csv("./Data/data-processed/tmp_grid.csv.gz")
+temp_data_filtered <-  subset(out, select = c("grid_id", "temp_mean", "date"))
+  
+temp_data_filtered <- temp_data_filtered %>%  filter(date >= as.Date("1979-01-01") & date <= as.Date("2020-12-31"))
+
+# write_csv(temp_data_filtered, "./Data/data-r4r/temperature/correct temp/temp_filtered_grid.csv.gz")
+
+# Convert the 'date' column to Date type if it's not already
+temp_data_filtered$date <- as.Date(temp_data_filtered$date)
+
+# Extract year and month from the date
+temp_data_filtered <- temp_data_filtered %>%
+  mutate(year = year(date), month = month(date))  # Extract year and month
+# write_csv(temp_data_filtered, "./Data/data-processed/temp_filtered_grid_incomplete_cells.csv.gz")
+# STOP HERE
+```
+
+### Yearly 
+the data to extract is temp_data_filtered
+```{r}
+# # Loading the data (if you lose the environment)
+# temp_data_filtered <- read_csv("./Data/data-processed/temp_filtered_grid_incomplete_cells.csv.gz")
+
+# Calculate the average monthly temperature for each grid_id and month
+avg_yearly_temp <- temp_data_filtered %>%
+  group_by(grid_id, year) %>%        # Group by grid_id, year, and month
+  summarize(avg_temp = mean(temp_mean, na.rm = TRUE))  # Calculate mean temperature
+
+# Pivot it to wide format
+avg_yearly_temp_wide <- avg_yearly_temp %>%
+  pivot_wider(names_from = year, values_from = avg_temp, names_prefix = "avg_temp_") %>%
+  arrange(grid_id)
+
+# find out in which grid_id the the row has NA value
+# Assuming avg_yearly_temp_sf is your data frame with avg_temp_1979
+na_grid_ids <- avg_yearly_temp_wide %>%
+  group_by(grid_id) %>%                          # Ungroup the data frame
+  as.data.frame() %>%                   # Convert to a regular data frame
+  filter(is.na(avg_temp_1979)) %>%          # Select only the grid_id column
+  pull(grid_id)                             # Extract the grid_ids as a vector
+  
+# # Visualize the grid cells with missing data
+# ggplot() +
+#   geom_sf(data = country_sf, fill = "lightblue", color = "black") +                     # Background grid
+#   geom_sf(data = country_sf[country_sf$grid_id %in% na_grid_ids, ], fill = "red", color = "orange") +  # Highlight grids with NA
+#   theme_minimal() +
+#   labs(title = "Grid Cells with Missing avg_temp_1979 Data", fill = "Temperature Data") +
+#   theme(legend.position = "none")  # Remove legend if not needed
+
+
+# write_csv(avg_yearly_temp, "./Data/data-r4r/avg_yearly_temp_grid_incomplete_cells.csv.gz")
+
+
+```
+
+so this is not important because those grid_id are islands of country, no need to fix it
+
+# GDP 
+because of the inclusion of GID_2^year fixed-effect
+https://sedac.ciesin.columbia.edu/data/set/sdp-downscaled-gdp-grid-b2-1990-2025
+
+now we both have the 1990 and 2025 data, generate a growth data of gdp from 1989 to 2025 by using gradual increase
+But first, need to load the data
+```{r}
+gdp_file_path <- "./Data/data-raw/gdp"
+
+# List all tif files in the folder
+gdp_count_tif_files <- list.files(gdp_file_path, pattern = "\\.ascii$", full.names = TRUE)
+
+# Initialize an empty master dataset
+gdp_grid_df <- data.frame(grid_id = country_sf$grid_id)
+
+# Loop through each tif file
+for (file in gdp_count_tif_files) {
+  # Extract the two-digit year from the file name
+  year_suffix <- gsub(".*(\\d{2})_.*", "\\1", basename(file))
+  
+  # Check if the year_suffix is numeric and not NA
+  if (!is.na(as.numeric(year_suffix))) {
+    # Determine the full year
+    if (as.numeric(year_suffix) > 50) {
+      gdp_year <- paste0("19", year_suffix)  # Assume 1900s if the suffix is greater than 50
+    } else {
+      gdp_year <- paste0("20", year_suffix)  # Otherwise assume 2000s
+    }
+  } else {
+    stop("Error: Could not extract a valid year from the file name.")
+  }
+
+  # Load raster
+  raster <- terra::rast(file)
+
+  # Extract GDP data for country
+  gdp <- exact_extract(raster, country_sf, fun = "mean")
+
+  # Add GDP data to the master dataset
+  gdp_grid_df[[paste0("gdp_", gdp_year)]] <- gdp
+}
+
+
+```
+## extrapolation
+
+GDP prediction based on scenario B2 
+https://sedac.ciesin.columbia.edu/data/set/sdp-downscaled-gdp-a1a2b1b2-1990-2100 #need to download the file for all the country
+chatgpt link for it: https://chatgpt.com/share/673b11c4-c554-8011-8c64-51a1bdf0b7a2
+
+we don't have anything GDP for AFG before 2000, so we need to extrapolate the GDP data for AFG from 1989 to 1999
+### based on gdp_grid_df
+```{r}
+# # Load necessary libraries
+# library(dplyr)
+# 
+# # Load country GDP data
+# 
+# # Load country GDP data
+# country_gdp_proj_b2 <- readxl::read_xls("./Data/data-raw/gdp/natl-gdp-proj-b2.xls", col_names = T)
+# 
+# # pivot the country_gdp_data to long format
+# # First, convert all column names to lower case and replace spaces with underscores
+# names(country_gdp_proj_b2) <- tolower(gsub(" ", "_", names(country_gdp_proj_b2)))
+# 
+# # Define the years columns you want to pivot
+# years <- c("1990", "1995", "2000", "2005", "2010", "2015", "2020", "2025", "2030", "2035", "2040", "2045", "2050", "2055", "2060", "2065", "2070", "2075", "2080", "2085", "2090", "2095", "2100")
+# 
+# # Pivot the data to long format
+# country_gdp_data_long <- country_gdp_proj_b2 %>%
+#   # Select the columns we need
+#   dplyr::select(un_code, name, all_of(years)) %>%
+#   # Rename 'un_code' to 'country_un_code' and 'name' to 'country_name'
+#   rename(country_un_code = un_code, country_name = name) %>%
+#   # Pivot the years to long format
+#   pivot_longer(
+#     cols = all_of(years),
+#     names_to = "year",
+#     values_to = "gdp"
+#   ) %>%
+#   # Convert year to integer
+#   mutate(year = as.integer(year),
+#          country_un_code = as.factor(country_un_code))
+# 
+# 
+# # Step 1: Filter the data for the chosen country and calculate the growth rates
+# country_gdp_data <- country_gdp_data_long %>%
+#   filter(country_un_code == country_code_2_number,
+#          year <= 2020) %>%
+#   arrange(year) %>%
+#   mutate(growth_rate = c(NA, diff(gdp) / head(gdp, -1)))  # Align diff(gdp) with previous year's GDP
+# 
+# 
+# 
+# # Step 1: Calculate annual growth rates from the 5-year growth rates
+# country_gdp_data <- country_gdp_data %>%
+#   arrange(year) %>%
+#   mutate(
+#     annual_growth_rate = ifelse(
+#       !is.na(growth_rate),
+#       (1 + growth_rate)^(1/5) - 1,  # Convert 5-year growth rate to annual rate
+#       NA
+#     )
+#   )
+# 
+# # Step 2: Interpolate annual growth rates for missing years
+# # Create a complete sequence of years from 1989 to 2020
+# all_years <- data.frame(year = 1989:2020)
+# 
+# # Merge with country GDP data
+# country_gdp_full <- all_years %>%
+#   left_join(country_gdp_data, by = "year") %>%
+#   mutate(
+#     # Interpolate missing annual growth rates, including years before 1995
+#     annual_growth_rate = zoo::na.approx(
+#       annual_growth_rate, 
+#       x = year, 
+#       na.rm = FALSE,  # Keep NA values for leading/trailing missing values
+#       rule = 2        # Linear extrapolation for leading/trailing NAs
+#     )
+#   )
+# 
+# country_projected_growth <- country_gdp_full %>%
+#   dplyr::select(year, annual_growth_rate) %>%
+#   rename(growth_rate = annual_growth_rate)
+# 
+# # # WB growth rate
+# # country_gdp_full <- real_growth %>% 
+# #   dplyr::select(year, growth_rate) %>%
+# #   dplyr::filter(year >= 1989 & year <= 2020)
+# 
+# # Step 3: Prepare a dataframe for extrapolated grid GDP
+# years_to_extrapolate <- 1989:2020
+# extrapolated_gdp_grid <- expand.grid(grid_id = gdp_grid_df$grid_id, year = years_to_extrapolate)
+# 
+# # Adjust grids with gdp_1990 == 0
+# adjusted_gdp_grid <- gdp_grid_df %>%
+#   mutate(
+#     gdp_1990 = ifelse(gdp_1990 == 0, 1e-6, gdp_1990),  # Replace 0 with a small value
+#     start_year = ifelse(gdp_1990 == 1e-6, 1991, 1989)  # Assume economic activity starts at least in 1989
+#   )
+# 
+# # Function to calculate CAGR (compound annual growth rate)
+# calculate_cagr <- function(gdp_start, gdp_end, years) {
+#   if (gdp_start == 0 || gdp_end == 0) return(NA)  # Avoid invalid calculations
+#   return((gdp_end / gdp_start)^(1 / years) - 1)
+# }
+# 
+# # Create an empty data frame for extrapolated GDP values
+# extrapolated_gdp_grid <- data.frame()
+# 
+# # Iterate over each grid and extrapolate GDP values
+# for (i in 1:nrow(adjusted_gdp_grid)) {
+#   grid_id <- adjusted_gdp_grid$grid_id[i]
+#   gdp_start <- adjusted_gdp_grid$gdp_1990[i]
+#   gdp_end <- adjusted_gdp_grid$gdp_2025[i]
+#   start_year <- adjusted_gdp_grid$start_year[i]
+# 
+#   # Calculate CAGR
+#   cagr <- calculate_cagr(gdp_start, gdp_end, 2025 - 1989)
+# 
+#   # Extrapolate GDP values for all years
+#   temp_df <- data.frame(
+#     grid_id = grid_id,
+#     year = 1989:2025,
+#     gdp_value = gdp_start * (1 + cagr)^(1989:2025 - 1989)
+#   )
+#   extrapolated_gdp_grid <- rbind(extrapolated_gdp_grid, temp_df)
+# }
+# 
+# # Identify grids where both 1990 and 2025 GDP values are 0
+# zero_gdp_grids <- gdp_grid_df %>% 
+#   filter(gdp_1990 == 0 & gdp_2025 == 0) %>%
+#   pull(grid_id)
+# 
+# # Replace all gdp_value to 0 for those grids and all years (1989 to 2024)
+# extrapolated_gdp_grid$gdp_value[extrapolated_gdp_grid$grid_id %in% zero_gdp_grids] <- 0
+# 
+# # change the name
+# extrapolated_gdp_grid <- extrapolated_gdp_grid %>%
+#   dplyr::rename(gdp = gdp_value)
+# 
+# 
+# # Verify the change
+# # Summarize the extrapolated GDP grid
+# summary(extrapolated_gdp_grid)
+# 
+# # write_rds(extrapolated_gdp_grid, "./Data/data-processed/extrapolated_gdp_grid.rds")
+# 
+# extrapolated_gdp_grid_until_2020 <- extrapolated_gdp_grid %>%
+#   filter(year <= 2020)
+# # write_rds(extrapolated_gdp_grid_until_2020, "./Data/data-processed/extrapolated_gdp_grid_until_2020.rds")
+# 
+# 
+# # View a few rows of the extrapolated data
+# head(extrapolated_gdp_grid_until_2020)
+
+```
+
+
+### based on national annual growth rate
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+library(readxl)
+
+# Load country GDP data
+country_gdp_proj_b2 <- readxl::read_xls("./Data/data-raw/gdp/natl-gdp-proj-b2.xls", col_names = T)
+
+# pivot the country_gdp_data to long format
+# First, convert all column names to lower case and replace spaces with underscores
+names(country_gdp_proj_b2) <- tolower(gsub(" ", "_", names(country_gdp_proj_b2)))
+
+# Define the years columns you want to pivot
+years <- c("1990", "1995", "2000", "2005", "2010", "2015", "2020", "2025", "2030", "2035", "2040", "2045", "2050", "2055", "2060", "2065", "2070", "2075", "2080", "2085", "2090", "2095", "2100")
+
+# Pivot the data to long format
+country_gdp_data_long <- country_gdp_proj_b2 %>%
+  # Select the columns we need
+  dplyr::select(un_code, name, all_of(years)) %>%
+  # Rename 'un_code' to 'country_un_code' and 'name' to 'country_name'
+  rename(country_un_code = un_code, country_name = name) %>%
+  # Pivot the years to long format
+  pivot_longer(
+    cols = all_of(years),
+    names_to = "year",
+    values_to = "gdp"
+  ) %>%
+  # Convert year to integer
+  mutate(year = as.integer(year),
+         country_un_code = as.factor(country_un_code))
+
+# Step 1: Filter the data for the chosen country and calculate the growth rates
+country_gdp_data <- country_gdp_data_long %>%
+  filter(country_un_code == country_code_2_number,
+         year <= 2020) %>%
+  arrange(year) %>%
+  mutate(growth_rate = c(NA, diff(gdp) / head(gdp, -1)))  # Align diff(gdp) with previous year's GDP
+
+# Step 1: Calculate annual growth rates from the 5-year growth rates
+country_gdp_data <- country_gdp_data %>%
+  arrange(year) %>%
+  mutate(
+    annual_growth_rate = ifelse(
+      !is.na(growth_rate),
+      (1 + growth_rate)^(1/5) - 1,  # Convert 5-year growth rate to annual rate
+      NA
+    )
+  )
+
+# Step 2: Interpolate annual growth rates for missing years
+# Create a complete sequence of years from 1989 to 2025
+all_years <- data.frame(year = 1989:2025)
+
+# Merge with country GDP data
+country_gdp_full <- all_years %>%
+  left_join(country_gdp_data, by = "year") %>%
+  mutate(
+    # Interpolate missing annual growth rates, including years before 1995
+    annual_growth_rate = zoo::na.approx(
+      annual_growth_rate, 
+      x = year, 
+      na.rm = FALSE,  # Keep NA values for leading/trailing missing values
+      rule = 2        # Linear extrapolation for leading/trailing NAs
+    )
+  )
+
+country_projected_growth <- country_gdp_full %>%
+  dplyr::select(year, annual_growth_rate) %>%
+  rename(growth_rate = annual_growth_rate)
+
+# Step 3: Prepare a dataframe for extrapolated grid GDP
+years_to_extrapolate <- 1989:2025
+extrapolated_gdp_grid <- expand.grid(grid_id = gdp_grid_df$grid_id, year = years_to_extrapolate)
+
+# Adjust grids with gdp_1990 == 0
+adjusted_gdp_grid <- gdp_grid_df %>%
+  mutate(
+    gdp_1990 = ifelse(gdp_1990 == 0, 1e-6, gdp_1990),  # Replace 0 with a small value
+    start_year = ifelse(gdp_1990 == 1e-6, 1991, 1989)  # Assume economic activity starts at least in 1989
+  )
+
+# Create an empty data frame for extrapolated GDP values
+extrapolated_gdp_grid <- data.frame()
+# Iterate over each grid and extrapolate GDP values using national growth rates
+for (i in 1:nrow(adjusted_gdp_grid)) {
+  grid_id <- adjusted_gdp_grid$grid_id[i]
+  gdp_start <- adjusted_gdp_grid$gdp_1990[i]
+  gdp_end <- adjusted_gdp_grid$gdp_2025[i]
+  start_year <- adjusted_gdp_grid$start_year[i]
+  
+  # Extrapolate GDP values for all years using national annual growth rate
+  gdp_values <- numeric(length(1989:2025))
+  gdp_values[1] <- gdp_start
+  
+  for (j in 2:length(1989:2025)) {
+    year <- 1989 + j - 1
+    national_growth_rate <- country_projected_growth$growth_rate[country_projected_growth$year == year]
+    gdp_values[j] <- gdp_values[j - 1] * (1 + national_growth_rate)
+  }
+  
+  temp_df <- data.frame(
+    grid_id = grid_id,
+    year = 1989:2025,
+    gdp_value = gdp_values
+  )
+  extrapolated_gdp_grid <- rbind(extrapolated_gdp_grid, temp_df)
+}
+
+# Identify grids where both 1990 and 2025 GDP values are 0
+zero_gdp_grids <- gdp_grid_df %>% 
+  filter(gdp_1990 == 0 & gdp_2025 == 0) %>%
+  pull(grid_id)
+
+# Replace all gdp_value to 0 for those grids and all years (1989 to 2024)
+extrapolated_gdp_grid$gdp_value[extrapolated_gdp_grid$grid_id %in% zero_gdp_grids] <- 0
+
+# Rename the column
+extrapolated_gdp_grid <- extrapolated_gdp_grid %>%
+  dplyr::rename(gdp = gdp_value)
+
+# Filter to include only up to 2020
+extrapolated_gdp_grid_until_2020 <- extrapolated_gdp_grid %>%
+  filter(year <= 2020)
+
+# View a few rows of the extrapolated data
+head(extrapolated_gdp_grid_until_2020)
+```
+## Check
+```{r}
+# # Summarize the extrapolated GDP grid data
+# gdp_summary <- extrapolated_gdp_grid %>%
+#   group_by(year) %>%
+#   summarise(
+#     mean_gdp = mean(gdp_value, na.rm = TRUE),
+#     median_gdp = median(gdp_value, na.rm = TRUE),
+#     min_gdp = min(gdp_value, na.rm = TRUE),
+#     max_gdp = max(gdp_value, na.rm = TRUE),
+#     total_gdp = sum(gdp_value, na.rm = TRUE),
+#     .groups = "drop"  # Ensures no unwanted grouping remains
+#   )
+# 
+# # View the summary
+# print(gdp_summary)
+# 
+# 
+# zero_gdp_grids <- gdp_grid_df %>%
+#   filter(gdp_1990 == 0 | gdp_2025 == 0)
+# 
+# zero_gdp_grids
+```
+
+# Agriculture production
+```{r}
+# 
+# # Folder containing the tif files
+# folder_path <- "./Data/data-raw/agriculture/GAEZ+_2015 Crop Production/GAEZ._2015_crop_production/total"
+# 
+# # List all tif files in the folder
+# tif_files <- list.files(folder_path, pattern = "\\.tif$", full.names = TRUE)
+# 
+# # Initialize an empty master dataset
+# master_crop_irrigated <- data.frame(grid_id = country_sf$grid_id)
+# master_crop_all <- data.frame(grid_id = country_sf$grid_id)
+# 
+# # Loop through each tif file
+# for (file in tif_files) {
+#   # Extract crop type from file name
+#   crop_type <- gsub(".tif", "", basename(file))
+#   crop_type <- sub(".*?_", "", crop_type)
+# 
+#   # Load raster
+#   raster <- terra::rast(file)
+# 
+#   # Extract crop production data for country
+#   crop_prod <- exact_extract(raster, country_sf, fun = "mean")
+# 
+#   # Add crop production data to master dataset
+#   master_crop_all[[paste0("crop_", crop_type)]] <- crop_prod
+# }
+# 
+# 
+# # # Sum up all crop values horizontally and create a column called crop_prod
+# # colnames(master_crop_irrigated)[-1] <- tolower(colnames(master_crop_irrigated)[-1])
+# # master_crop_irrigated$crop_prod <- rowSums(master_crop_irrigated[, grepl("^crop_", names(master_crop_irrigated))])
+# # crop_prod_irrigated <- subset(master_crop_irrigated, select = c("grid_id", "crop_prod"))
+# 
+# # for master_crop_all
+# # Sum up all crop values horizontally and create a column called crop_prod
+# colnames(master_crop_all)[-1] <- tolower(colnames(master_crop_all)[-1])
+# master_crop_all$crop_prod <- rowSums(master_crop_all[, grepl("^crop_", names(master_crop_all))])
+# crop_prod <- subset(master_crop_all, select = c("grid_id", "crop_prod"))
+# write_csv(crop_prod, "./Data/data-r4r/crop_prod_all_grid.csv")
+# 
+# # crop_prod <- read_csv("./Data/export/crop_prod.csv")
+# crop_prod_sf <- st_sf(crop_prod, geometry = country_geometry)
+# 
+# # Remove NA values
+# crop_prod_filtered <- crop_prod[!is.na(crop_prod$crop_prod),]
+# 
+# # Get the limits for the color scale
+# color_limits <- quantile(crop_prod_filtered$crop_prod, c(0, 1))
+# 
+# # Plot
+# p_crop_production <- ggplot() +
+#   geom_sf(data = crop_prod_filtered, aes(fill = crop_prod)) +
+#   geom_sf(data = crop_prod[is.na(crop_prod$crop_prod),], fill = "gray", color = "black") +  # Fill regions without data with gray
+#   scale_fill_gradient(low = "lightgreen", high = "magenta", limits = color_limits) +  
+#   labs(title = "Crop Production Visualization",
+#        fill = "Crop Production") +
+#   theme_minimal()
+# 
+# p_crop_production
+# 
+# ggsave("./Data/figures/crop_production.pdf", plot = p_crop_production)
+
+
+```
+
+# Cropland
+My argument for using this instead of using the agriculture production of 2015: in my AE paper I used the Agriculture production which only covered the year of 2015, this is defined as the national crop production of both rainfed and irrigated crops. While this data has the manifested demand of agriculture product (including the export oriented crops), the cropland on the other hand is the land used for annual perennial herbaceous crops for human consumptions, so here we are focus on land, bear in mind that I am fully aware that the amount of crop produced in land can vary - either increase or decrease because of various reasons (demand, weather condition, productivity, farming technique), compared to land, which is a much more fixed component. The decision to increase or decrease the amount of land is much more a strategic and long-term decision, thus it reflects the structural change in an area, a region or a country as a whole. 
+
+### Glad 
+2003, 2007, 2011, 2015, 2019
+```{r pressure, echo= F}
+folder_path_cropland <- "./Data/data-raw/cropland/glad"
+
+# List all tif files in the folder
+tif_files <- list.files(folder_path_cropland, pattern = "\\.tif$", full.names = TRUE)
+
+# Initialize an empty master dataset
+cropland_glad_grid_df <- data.frame(grid_id = country_sf$grid_id)
+raster::res(raster("./Data/data-raw/cropland/glad/glad_cropland_2019.tif"))
+
+# Loop through each tif file
+for (file in tif_files) {
+  # Extract cropland year from file name
+  cropland_year <- gsub(".*_(\\d{4})\\.tif$", "\\1", basename(file))
+
+  # Load raster
+  raster <- terra::rast(file)
+
+  # Extract crop production data for country
+  cropland <- exact_extract(raster, country_sf, fun = "mean")
+
+  # Add crop production data to master dataset
+  cropland_glad_grid_df[[paste0("cropland_", cropland_year)]] <- cropland
+}
+# write_csv(cropland_glad_grid_df, "./Data/data-processed/master_cropland_glad_grid_incomplete_cells.csv")
+```
+
+so the dataframe is cropland_glad_grid_df
+
+### Extrapolation
+#### Correct version
+```{r}
+# Function to calculate adjusted growth rates based on existing data
+calculate_adjusted_growth_rates <- function(data) {
+  growth_rates <- numeric(length = 4)  # There will be 4 intervals
+  
+  for (i in 1:4) {
+    # Calculate the 4-year growth rate
+    four_year_growth_rate <- (data[i + 1] - data[i]) / data[i]
+    # Convert to annual growth rate
+    annual_growth_rate <- (1 + four_year_growth_rate)^(1/4) - 1
+    # Adjust the growth rate for historical context (e.g., reduce by half)
+    adjusted_growth_rate <- annual_growth_rate * 0.5  # Assuming half the rate for pre-2003
+    growth_rates[i] <- adjusted_growth_rate
+  }
+  
+  # Return adjusted annual growth rates
+  return(growth_rates)
+}
+
+# Function to apply adjusted growth rate for the years 1989 to 2002 for cropland
+apply_adjusted_cropland_growth_rate <- function(cropland_2003, growth_rate_2003_2007) {
+  # Initialize cropland vector from 1989 to 2003
+  cropland <- numeric(15)  # 2003 - 1989 + 1 = 15 years
+  
+  # Set the 2003 value
+  cropland[15] <- cropland_2003
+  
+  # Apply the growth rate backward from 2003 to 1989
+  for (i in 14:1) {
+    # Using only the growth rate from 2003 to 2007 for all years
+    cropland[i] <- cropland[i + 1] / (1 + growth_rate_2003_2007)
+  }
+  
+  return(cropland)
+}
+
+# Define the years we are interpolating/extrapolating for
+years <- 1989:2020
+
+# Apply the calculations and extrapolations for each grid
+result_list_cropland <- lapply(seq_len(nrow(cropland_glad_grid_df)), function(i) {
+  grid_data <- cropland_glad_grid_df[i, ]
+  
+  # Get the cropland values for this grid
+  cropland_values <- c(grid_data$cropland_2003, grid_data$cropland_2007, 
+                       grid_data$cropland_2011, grid_data$cropland_2015, 
+                       grid_data$cropland_2019)
+  
+  # Calculate the adjusted growth rate based on the first interval (2003-2007)
+  growth_rate_2003_2007 <- calculate_adjusted_growth_rates(cropland_values)[1]
+  
+  # Extrapolate for 1989-2002 using the adjusted growth rate from 2003-2007
+  cropland_1989_2002 <- apply_adjusted_cropland_growth_rate(grid_data$cropland_2003, growth_rate_2003_2007)
+  
+  # Interpolate for the years after 2003 using linear interpolation
+  interpolated_cropland <- approx(x = c(2003, 2007, 2011, 2015, 2019), 
+                                   y = cropland_values, 
+                                   xout = 2003:2020, rule = 2)$y
+  
+  # Combine extrapolated and interpolated data
+  full_cropland <- c(cropland_1989_2002[1:14], interpolated_cropland)
+  
+  # Create a dataframe for the interpolated data
+  result_df <- data.frame(grid_id = grid_data$grid_id, year = years, 
+                          cropland_percentage = full_cropland)
+  
+  return(result_df)
+})
+
+# Combine all results into a single dataframe
+interpolated_cropland_long_grid_df <- bind_rows(result_list_cropland)
+
+# Set NaN values to 0
+interpolated_cropland_long_grid_df[is.na(interpolated_cropland_long_grid_df)] <- 0
+
+# Set NaN values to 0 in the wide dataframe as well
+# interpolated_cropland_wide_grid_df[is.na(interpolated_cropland_wide_grid_df)] <- 0
+
+# Replace Inf with 0 only in numeric columns for the long dataframe
+numeric_cols_long <- sapply(interpolated_cropland_long_grid_df, is.numeric)
+interpolated_cropland_long_grid_df[numeric_cols_long] <- lapply(interpolated_cropland_long_grid_df[numeric_cols_long], function(x) {
+  x[is.infinite(x)] <- 0
+  return(x)
+})
+```
+
+#### Test
+```{r}
+
+```
+# Adding additional data
+Let's do some basic things
+Some important data to take note 
+- UCDP conflict data: geo_event_ucdp_country_sf
+- water stress data from last AE project: ws_subdistrict_country, this is based on the subdistrict, there are the suggestion to do it on the basin level or the grid level
+- World Bank project: level_1a_wb_country_sf, projects related to water and agriculture level_1a_wb_country_water_sf 
+
+Strategy 1: get the count of number of conflicts and number of world bank relate to water project of each subdistrict inside the subdistrict
+
+Strategy 2: just get the dummy of whether conflicts and world bank projects are present in the subdistrict
+
+Apply the same 2 same strategies to the the grid level (have to choose the unit of the grid) and the basin level
+
+
+so here, the water stress for each grid would stay the same, but whether they have the World Bank project money or not is a different matter
+
+this data consists of precipitation data, population, temperature, gdp and crop production of both rainfed and irrigated, based on the grid of 50km (0.449*)
+
+extracting the data of project
+## Project
+
+11.09.2024
+Get the donor and recipient id of each project: donors_iso3, recipients_iso3
+time component of the project
+start_actual_isodate: starting date
+end_actual_isodate: ending date
+transactions_start_year: starting year
+transactions_end_year: ending year
+ad_sector_code: applied sector of the project
+get the sector of the project as well
+
+let add wb in front of those variables and see what happens 
+the challegne now is that it is aggregated into single grid of 50 * 50 km, any suggestion on how to aggregate those variables above of each project into one single grid? DONE
+
+take a look at the sector code, separate the count for water/agri/forestry related-projects and the rest, as well as the dummy for it, the related sector code (from the wb_sector_trans_crosswalk) are 311, 312, 310, 140
+
+
+```{r}
+sf::st_make_valid(locations_wb_country_sf)
+# do the calculation for imbur and commi again-------------
+# Filter out rows where the conflict ID is NA, then count conflicts by subdistrict
+
+# Disable the s2 geometry engine
+sf_use_s2(FALSE)
+
+# Perform the spatial join
+grid_wb_projects <- st_join(locations_wb_country_sf, country_sf, join = st_intersects)
+
+# Re-enable the s2 geometry engine
+sf_use_s2(TRUE)
+
+# Inspect the result
+print(grid_wb_projects)
+
+# Adding duration of each project in year in the main data frame
+grid_wb_projects <- grid_wb_projects %>%
+  mutate(project_duration = transactions_end_year - transactions_start_year)  # Calculate duration in years
+
+
+# now creating a dataframe based on grid_id, aggregating the average project duration 
+
+wb_projects_grid_duration <- grid_wb_projects %>%
+  filter(!is.na(project_id)) %>%  # Exclude rows where the project_id is NA
+  group_by(grid_id, transactions_start_year, project_id) %>%  # Group by grid_id, year, and project_id
+  summarise(project_duration = mean(project_duration, na.rm = TRUE), .groups = 'drop') %>%  # Calculate mean duration for each project_id
+  group_by(grid_id, transactions_start_year) %>%  # Group by grid_id and year
+  summarise(avg_project_duration = mean(project_duration, na.rm = TRUE), .groups = 'drop') %>%  # Calculate the average duration across unique projects
+  sf::st_drop_geometry() %>%
+  rename(year = transactions_start_year)
+
+
+# # Disimbursement, WE SKIPPED THIS
+# 
+# disimbursement_projects_grids_total <- grid_wb_projects %>%
+#   filter(!is.na(project_location_id)) %>%  # Exclude rows where the project_location_id is NA
+#   group_by(grid_id, transactions_start_year) %>%  # Group by subdistrict ID
+#   summarise(total_disbur = sum(ifelse(is.na(even_split_disbursements), 0, even_split_disbursements))) %>%  # Sum disbursements, treating NA as 0 
+#   sf::st_drop_geometry() %>%  # Drop geometry if you need to merge with non-spatial data 
+#   rename(year = transactions_start_year)
+
+# same for commitment
+commitment_projects_grids_total <- grid_wb_projects %>%
+  filter(!is.na(project_location_id)) %>%  # Exclude rows where the project_location_id is NA
+  group_by(grid_id, transactions_start_year) %>%  # Group by subdistrict ID
+  summarise(total_commi = sum(ifelse(is.na(even_split_commitments), 0, even_split_commitments))) %>%  # Sum disbursements, treating NA as 0 
+  sf::st_drop_geometry()  %>% # Drop geometry if you need to merge with non-spatial data
+  rename(year = transactions_start_year)
+
+
+
+# count
+## comment about this code, I think this summarise code counts the number of project_location_id, not how many different project_id in one grid (a project could take place in multiple location)
+wb_project_location_grid_counts <- grid_wb_projects %>%
+  filter(!is.na(project_id)) %>%  # Exclude rows where the conflict ID is NA
+  group_by(grid_id, transactions_start_year) %>%  # Group by grid_id ID and by year
+  summarise(project_location_count = n()) %>%  # Count the number of project location (no matter if it is same or different project) per grid_id,of each year
+  sf::st_drop_geometry() %>%  # Drop geometry for easier merging
+  rename(year = transactions_start_year)
+
+
+## count the number of project_id in each grid, not the project_location_id
+wb_projects_grid_counts <- grid_wb_projects %>%
+  filter(!is.na(project_id)) %>%  # Exclude rows where the conflict ID is NA
+  group_by(grid_id, transactions_start_year) %>%  # Group by grid_id ID and by year
+  summarise(project_count = length(unique(project_id))) %>%  # Count the number of project location (no matter if it is same or different project) per grid_id,of each year
+  sf::st_drop_geometry() %>%  # Drop geometry for easier merging
+  rename(year = transactions_start_year)
+
+
+# Sector of the project, two variables for the count: one for the count of how many project_location_id that has at least one of the water-related sector, one for otherwise. one for the dummy (put it in categories, water related or not, if it is water related, then 1, otherwise 0)
+# Water sector code: 311, 312, 310, 140
+
+wb_projects_grid_sectors <- grid_wb_projects %>%
+  filter(!is.na(project_id)) %>%  # Exclude rows where the project ID is NA
+  group_by(grid_id, transactions_start_year) %>%  # Group by grid ID and year
+  summarise(
+    # Count the number of projects with at least one water-related sector code
+    project_location_water_count = sum(
+      sapply(ad_sector_codes, function(codes) any(codes %in% c("311", "312", "310", "140"))),
+      na.rm = TRUE
+    ),
+    # Count the number of projects without any water-related sector codes
+    project_location_other_count = sum(
+      sapply(ad_sector_codes, function(codes) !any(codes %in% c("311", "312", "310", "140"))),
+      na.rm = TRUE
+    )
+  ) %>% 
+  sf::st_drop_geometry() %>%  # Drop geometry for easier merging
+  rename(year = transactions_start_year)
+
+
+
+# time component agregated. Note: even some of the project lacks the date data
+# Aggregate project data by grid
+
+wb_detail_grided <- grid_wb_projects %>%
+  group_by(grid_id, transactions_start_year) %>%
+  summarise(
+    # # Concatenate donors and recipients, removing duplicates; replace empty string with NA
+    # wb_donors_iso3 = ifelse(paste(unique(donors_iso3), collapse = ", ") == "", NA, paste(unique(donors_iso3), collapse = ", ")),
+    # wb_recipients_iso3 = ifelse(paste(unique(recipients_iso3), collapse = ", ") == "", NA, paste(unique(recipients_iso3), collapse = ", ")),
+    
+    # # For time components, take min and max
+    # agg_wb_start_actual_isodate = min(start_actual_isodate, na.rm = TRUE),
+    # agg_wb_end_actual_isodate = max(end_actual_isodate, na.rm = TRUE),
+    
+    # Aggregate start and end years; replace with NA if no values 
+    agg_wb_transactions_end_year = ifelse(is.infinite(max(transactions_end_year, na.rm = TRUE)), NA, max(transactions_end_year, na.rm = TRUE)),
+    
+    # Concatenate sector codes, replace empty with NA
+    agg_wb_ad_sector_codes = ifelse(paste(unique(ad_sector_codes), collapse = ", ") == "", NA, paste(unique(ad_sector_codes), collapse = ", "))
+  )  %>%
+  st_drop_geometry() %>%
+  # mutate(
+  #   # Convert character to Date
+  #   agg_wb_start_actual_isodate = as.Date(agg_wb_start_actual_isodate),
+  #   agg_wb_end_actual_isodate = as.Date(agg_wb_end_actual_isodate),
+  #   
+  #   # Extract the month, skipping NA values
+  #   agg_wb_start_month = ifelse(is.na(agg_wb_start_actual_isodate), NA, lubridate::month(agg_wb_start_actual_isodate)),
+  #   agg_wb_end_month = ifelse(is.na(agg_wb_end_actual_isodate), NA, lubridate::month(agg_wb_end_actual_isodate))
+  # ) %>%
+  rename (year = transactions_start_year)
+
+
+  # join the disimbursement, commitement, as well as the the count and dummy
+wb_detail_grided_final <- wb_detail_grided %>%
+  # left_join(disimbursement_projects_grids_total, by = c("grid_id", "year")) %>%
+  # mutate(total_disbur = ifelse(is.na(total_disbur), 0, total_disbur)) %>%
+  left_join(commitment_projects_grids_total, by = c("grid_id", "year")) %>%
+  mutate(total_commi = ifelse(is.na(total_commi), 0, total_commi)) %>%
+  left_join(wb_projects_grid_counts, by = c("grid_id", "year")) %>%
+  left_join(wb_project_location_grid_counts, by = c("grid_id", "year")) %>%
+  left_join(wb_projects_grid_duration, by = c("grid_id", "year")) %>%
+  left_join(wb_projects_grid_sectors, by = c("grid_id", "year"))
+  
+##################################################################################
+# for each water stress category, calculate how many project location each water stress category has, the joined file between water stress and project location is grid_wb_projects
+# first, we need to join the water stress data with the grid_wb_projects
+# then we can count the number of project location for each water stress category
+# then we can calculate the average project duration for each water stress category, just give me the code for the first part, I will do the rest
+
+```
+bear in mind that the aggregated starting year of WB project year variable is changed to year
+
+### data from ancillary.csv (set aside for now)
+comment from the author: 
+The file projects_ancillary.csv contains all fields that are found in exports from the World Bank project database. The ancillary table also includes all IEG evaluations that have been conducted on World Bank projects approved from 1995-2014 and all supervision and completion costs on projects approved from 2000-2014.
+
+therefore it would be interesting to get the lending instrument, lending instrument type as well as the IEG evaluation
+
+dataframe is projects_ancillary_wb_country, this is filter by project
+the variable to extract for lending instrument is lending_instrument and lending_instrument_type
+the dataframe that is attached to country gridis grid_wb_projects -> doing the left_join is the best option here, step-by-step
+
+
+### Check 
+this code chunk is not meant to be run by reviewer
+if there are more than one project in one grid
+```{r}
+# # Check for grids with multiple projects
+# grid_wb_projects_df <- grid_wb_projects %>%
+#   st_drop_geometry()
+# 
+# multiple_projects_in_grid <- grid_wb_projects_df %>%
+#   group_by(grid_id) %>%                     # Group by grid_id
+#   summarise(project_count = n_distinct(project_id)) %>%  # Count unique project_id in each grid
+#   filter(project_count > 1)                 # Filter for grids with more than one project
+# 
+# # Join back to get the specific projects associated with those grids
+# grids_with_multiple_projects <- grid_wb_projects_df %>%
+#   semi_join(multiple_projects_in_grid, by = "grid_id")   # Keep only rows from grid_wb_projects with multiple projects
+# 
+# # Print out grids with multiple projects and associated project IDs
+# print(grids_with_multiple_projects)
+# 
+# # Optionally, you can count how many grids have multiple projects
+# count_of_grids_with_multiple_projects <- nrow(multiple_projects_in_grid)
+# print(count_of_grids_with_multiple_projects)
+# 
+# View(multiple_projects_in_grid)
+# 
+# #-------------------------------------------------------------------------------
+# # For lending instrument 
+# # Check and display multiple lending_instrument_type values within the same grid and transaction year
+# multiple_instruments <- grid_wb_projects %>%
+#   st_drop_geometry() %>%
+#   left_join(subset(projects_ancillary_wb_country, select = c("project_id", "lending_instrument", "lending_instrument_type")), 
+#             by = c("project_id" = "project_id")) %>%
+#   group_by(grid_id, transactions_start_year) %>%
+#   summarise(
+#     lending_instrument_type_count = n_distinct(lending_instrument)
+#   ) %>%
+#   filter(lending_instrument_type_count > 1)
+# 
+# multiple_instruments <- subset(wb_projects_ancillary, 
+#                                (grid_id == 1276 & year == 2012) | (grid_id == 2511 & year == 2014), 
+#         select = c("grid_id", "transactions_start_year", "lending_instrument", "lending_instrument_type"))
+# 
+# 
+# # Display the results
+# View(multiple_instruments)
+# 
+# # how many unique project_location_id in level_1a_wb_country_sf
+# unique_project_location_id <- unique(level_1a_wb_country_sf$project_location_id)
+# length(unique_project_location_id)
+# 
+# # how many unique project_id in level_1a_wb_country_sf
+# unique_project_id <- unique(level_1a_wb_country_sf$project_id)
+# length(unique_project_id)
+# 
+# # how many row in grid_wb_projects of column ad_sector_codes that has 140 included in the value
+# count_140 <- grid_wb_projects %>%
+#   filter(ad_sector_codes %in% c("140")) %>%
+#   nrow()
+# count_140
+# 
+# # check on the grid_wb_projects dataframe how many rows that have empty disbursement value (total_disbursement)
+# count_empty_disbursement <- grid_wb_projects %>%
+#   filter(is.na(total_disbursements)) %>%
+#   nrow()
+# count_empty_disbursement
+# 
+# # those na values are from how many unique project_id?
+# unique_project_id_empty_disbursement <- unique(grid_wb_projects$project_id[is.na(grid_wb_projects$total_disbursements)])
+# length(unique_project_id_empty_disbursement)
+# unique_project_id_empty_disbursement
+# ```
+# Comment: there are two grids which have different lending instrument which make it difficult to summarise into one row of grid_id -> 1276 in 2012 and 2511 in 2014
+# 
+# 
+#   Checking for different unique project id in the dataframe that we use for regression (level_1a) and the ieg data downloaded from the WB website
+# ```{r}
+# # extract the unique project_id in level_1a_wb_country_sf and compare it to project_id in wb_ieg_rating_country to see if there are any missing project_id
+# unique_project_id_level_1a <- unique(level_1a_wb_country_sf$project_id)
+# unique_wb_ancillary <- unique(wb_ieg_project_ancillary_country$project_id)
+# unique_project_id_ieg <- unique(wb_ieg_rating_country$project_id)
+# # now comparing those two
+# missing_project_id <- setdiff(unique_project_id_level_1a, unique_project_id_ieg)
+# 
+# # Count the number of unique project IDs in each set
+# num_unique_level_1a <- length(unique_project_id_level_1a)
+# num_unique_wb_ancillary <- length(unique_wb_ancillary)
+# num_unique_ieg <- length(unique_project_id_ieg)
+# num_missing_project_id <- length(missing_project_id)
+# 
+# # Display the results
+# num_unique_level_1a
+# num_unique_wb_ancillary
+# num_unique_ieg
+# num_missing_project_id
+
+```
+
+IEG rating: the number of unique project id paints the following picture, the number of unique level in the dataframe that we use for regression (level_1a) is 190, for ieg data downloaded from WB website is 134, when I checked for the different project id, there are 93 unique projects that are different from the level_1a dataframe, which means that, these two dataframe are reporting different set of dataframe in country, also with the wb_project_ancillary have a lot of empty data. Suggestion would be that I scrape the data from the WB website and fill out the empty row (help from Mr. D)
+
+## Conflict
+adding the time component of conflict as well
+it is the variable year
+```{r}
+# Perform a spatial join to associate conflict events with subdistricts
+grid_conflicts <- st_join(country_sf, geo_event_ucdp_country_sf, join = st_intersects)
+
+# Filter out rows where the conflict ID is NA, then count conflicts by subdistrict
+conflict_grid_counts <- grid_conflicts %>%
+  filter(!is.na(conflict_id)) %>%  # Exclude rows where the conflict ID is NA
+  group_by(grid_id, year) %>%
+  summarise(
+    conflicts_count = n(),  # Count the total number of conflict events per grid
+  ) %>%
+  st_drop_geometry()
+
+# count for each type of conflicts, there are three type of conflicts, state-based, non-state, and one-sided, the variable is type_of_violence, create the count variable for each type of violence (1, 2, 3)
+conflict_grid_type_violence_counts <- grid_conflicts %>%
+  filter(!is.na(conflict_id)) %>%  # Exclude rows where the conflict ID is NA
+  group_by(grid_id, year) %>%
+  summarise(
+    state_based_count = sum(type_of_violence == 1, na.rm = TRUE),  # Count the total number of state-based conflict events per grid
+    non_state_count = sum(type_of_violence == 2, na.rm = TRUE),  # Count the total number of non-state conflict events per grid
+    one_sided_count = sum(type_of_violence == 3, na.rm = TRUE)  # Count the total number of one-sided conflict events per grid
+  ) %>%
+  st_drop_geometry()
+
+# count the death, including deaths_a, deaths_b, deaths_civilians, deaths_unknown, best, high, low estimates
+conflict_grid_death_counts <- grid_conflicts %>%
+  filter(!is.na(conflict_id)) %>%  # Exclude rows where the conflict ID is NA
+  group_by(grid_id, year) %>%
+  summarise(
+    deaths_a_count = sum(deaths_a, na.rm = TRUE),  # Count the total number of deaths_a per grid
+    deaths_b_count = sum(deaths_b, na.rm = TRUE),  # Count the total number of deaths_b per grid
+    deaths_civilians_count = sum(deaths_civilians, na.rm = TRUE),  # Count the total number of deaths_civilians per grid
+    deaths_unknown_count = sum(deaths_unknown, na.rm = TRUE),  # Count the total number of deaths_unknown per grid
+    best_death_count = sum(best, na.rm = TRUE),  # Count the total number of best estimates per grid
+    high_death_count = sum(high, na.rm = TRUE),  # Count the total number of high estimates per grid
+    low_death_count = sum(low, na.rm = TRUE)  # Count the total number of low estimates per grid
+  ) %>%
+  st_drop_geometry()
+
+# merge all of those dataframe into one
+conflict_grid_manipulated <- conflict_grid_counts %>%
+  left_join(conflict_grid_type_violence_counts, by = c("grid_id", "year")) %>%
+  left_join(conflict_grid_death_counts, by = c("grid_id", "year"))
+
+# Backup the data
+# write_rds(conflict_grid_manipulated, "./Data/data-processed/conflict_grid_manipulated.rds")
+
+conflict_grid_backup <- conflict_grid_manipulated
+
+```
+
+explanation for this dataframe conflict_grid_manipulated, based on grid_id and year
+conflicts_count: total of conflict events
+state_based_count: total of state-based conflict events
+non_state_count: total of non-state conflict events
+one_sided_count: total of one-sided conflict events
+deaths_a_count: total of deaths of the perpetrator
+deaths_b_count: total of deaths of the target
+deaths_civilians_count: total of deaths of civilians
+deaths_unknown_count: total of deaths of unknown
+best_death_count: the best estimate of total fatalities resulting from all events in each grid in each year. It is always the sum of deaths_a, deaths_b, deaths_civilians and deaths_unknown.
+high_death_count: the high estimate of total fatalities resulting from all events in each grid in each year. It is always the sum of deaths_a, deaths_b, deaths_civilians and deaths_unknown.
+low_death_count: the low estimate of total fatalities resulting from all events in each grid in each year. It is always the sum of deaths_a, deaths_b, deaths_civilians and deaths_unknown.
+
+Definition of State-based Armed Conflict
+UCDP defines state-based armed conflict as: “a contested incompatibility that concerns government and/or territory where the use of armed force between two parties, of which at least one is the government of a state, results in at least 25 battle-related deaths in a calendar year.”
+
+Definition of Non-State conflict
+A non-state conflict is defined by the Uppsala Conflict Data Program (UCDP) as “the use of armed force between two organized armed groups, neither of which is the government of a state, which results in at least 25 battle-related deaths in a year.”
+
+Definition of One-sided violence
+One-sided violence is the use of armed force by the government of a state or by a formally organized group against civilians which results in at least 25 deaths. Extrajudicial killings in custody are excluded
+
+
+
+## Water stress
+
+### annually
+```{r}
+# Perform a spatial join to extract bws_raw from ws_test to grid_intersect
+grid_intersect_backup <- st_make_valid(country_sf)
+ws_test <- st_make_valid(ws_annual_country)
+ws_test <- ws_test %>%
+  mutate(area = st_area(.) %>% as.numeric())
+# Transform CRS if needed
+ws_test <- st_transform(ws_test, st_crs(country_sf))
+
+grid_intersect_bws <- st_join(country_sf, ws_test, join = st_intersects)
+
+grid_intersect_bws$bws_raw <- ifelse(grid_intersect_bws$bws_raw < 0, NA, grid_intersect_bws$bws_raw)
+grid_intersect_bws$bws_raw <- ifelse(grid_intersect_bws$bws_raw == 9999, 25.305459, grid_intersect_bws$bws_raw)
+
+grid_intersect_bws <- grid_intersect_bws %>%
+  mutate(area_grid_inte = st_area(.) %>% as.numeric())
+
+
+
+# Calculate the weighted bws_raw by area for each grid
+grid_intersect_bws_test <- grid_intersect_bws %>%
+  group_by(grid_id) %>%
+  mutate(
+    weight = area_grid_inte / area,
+    weighted_bws_raw = bws_raw * weight
+  ) %>%
+  summarise(
+    bws_raw = sum(weighted_bws_raw, na.rm = TRUE) / sum(weight, na.rm = TRUE)
+  )
+
+# If there are multiple basins within a single grid cell, you may want to aggregate
+# For example, taking the mean of bws_raw if it's numeric
+# grid_intersect_bws_test2 <- grid_intersect_bws %>%
+#   group_by(grid_id) %>%
+#   summarise(avg_bws_raw = mean(bws_raw, na.rm = TRUE))  # You can choose an appropriate aggregation method
+
+
+# get the category from the weighted_mean bws_raw
+grid_intersect_bws_test <- grid_intersect_bws_test %>%
+  mutate(
+    bws_cat = case_when(
+      bws_raw == 1 ~ 0,  # Special case for bws_raw = 0 (because after taking a look at the grid_final_df, there is only one grid that has bws_raw = -1, so we transform this bws of this grid to 0 to solve the multicolinarity problem of having the bws_cat == 4 being removed from the regression)
+      bws_raw < 0.10 ~ 0,
+      bws_raw >= 0.10 & bws_raw < 0.20 ~ 1,
+      bws_raw >= 0.20 & bws_raw < 0.40 ~ 2,
+      bws_raw >= 0.40 & bws_raw < 0.80 ~ 3,
+      bws_raw >= 0.80 ~ 4
+    ),
+    bws_label = case_when(
+      bws_raw == 1 ~ "Arid and Low Water Use",  # Special label for bws_raw = 1
+      bws_cat == 0 ~ "Low <10%",
+      bws_cat == 1 ~ "Low - Medium 10–20%",
+      bws_cat == 2 ~ "Medium - High 20–40%",
+      bws_cat == 3 ~ "High 40–80%",
+      bws_cat == 4 ~ "Extreme >80%",
+    )
+  ) %>%
+  mutate(bws_cat = as.factor(bws_cat))
+
+grid_intersect_bws_test_df <- grid_intersect_bws_test %>%
+  st_drop_geometry()
+
+grid_intersect_bws_test_sf <- st_as_sf(grid_intersect_bws_test_df, geometry = st_geometry(country_sf))
+
+# grid_intersect_bws_test$bws_cat <- as.factor(grid_intersect_bws_test$bws_cat)
+
+# identify the grid_id with NA value of bws_cat
+grid_intersect_bws_test_na <- grid_intersect_bws_test_df %>%
+  filter(is.na(bws_cat)) %>%
+  pull(grid_id)
+
+# Visualize the country_sf with water stress (grid_intersect_bws_test_sf) and the foreign aid project (locations_wb_country_sf)
+# Your defined colors and labels for water stress categories
+water_stress_colors <- c(
+  "-9999" = "grey50",  # No Data
+  "-1" = "grey80",     # Assuming -1 might represent another special category
+  "0" = "#FFFFCC",     # Low (<10%) - Lightest
+  "1" = "#FED976",     # Low - Medium (10-20%) - Slightly darker
+  "2" = "#FEB24C",     # Medium - High (20-40%) - Darker
+  "3" = "#FD8D3C",     # High (40-80%) - Even darker
+  "4" = "#BD0026"      # Extremely High (>80%) - Darkest, red
+)
+
+water_stress_labels <- c(
+  "-9999" = "No Data",
+  "-1" = "Arid and Low Water Use",  # Adjust if -1 has a specific meaning
+  "0" = "Low (<10%)",
+  "1" = "Low - Medium (10-20%)",
+  "2" = "Medium - High (20-40%)",
+  "3" = "High (40-80%)",
+  "4" = "Extremely High (>80%)"
+)
+
+# Step 1: Plot the country outline
+ggplot() +
+  # Add the country shapefile
+  geom_sf(data = country_sf, fill = "lightgray", color = "black") +
+  
+  # Step 2: Add water stress data with custom colors
+  geom_sf(data = grid_intersect_bws_test_sf, aes(fill = as.character(bws_cat)), alpha = 0.6) +
+  scale_fill_manual(values = water_stress_colors, 
+                    name = "Water Stress Category", 
+                    labels = water_stress_labels) +
+  
+  # Step 3: Add foreign aid project locations
+  geom_sf(data = locations_wb_country_sf, color = "blue", size = 0.5, shape = 21, fill = "black") +
+  
+  # Step 4: Customize the plot
+  labs(title = "Foreign Aid Projects and Water Stress in India",
+       subtitle = "Red dots represent foreign aid project locations",
+       caption = "Data sources: World Bank, Water Stress Data") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank())  # Removes grid lines for cleaner map
+```
+###check
+```{r}
+# Step 1: Perform a spatial join to find which water stress category each project falls into
+# This assumes that locations_wb_country_sf is a point layer and grid_intersect_bws_test_sf is a polygon layer
+project_distribution <- st_join(locations_wb_country_sf, grid_intersect_bws_test_sf, join = st_intersects) %>%
+  # Step 2: Count the number of projects in each water stress category
+  count(bws_cat) %>%
+  # Step 3: Rename the column for clarity
+  rename(project_locations_count = n) %>%
+  # Step 4: Arrange by bws_cat for a logical order
+  arrange(bws_cat) %>%
+  st_drop_geometry() %>%
+  mutate(percentage = project_locations_count/sum(project_locations_count)  * 100)
+
+# Step 5: Display or further process the result
+print(project_distribution)
+
+#####################################################
+library(dplyr)
+library(tidyr)
+library(sf)
+library(stringr)
+
+# Assuming locations_wb_country_sf has project locations with ad_sector_codes
+# and grid_intersect_bws_test_sf has water stress categories
+
+# Step 1: Split the sector codes
+sector_distribution <- locations_wb_country_sf %>%
+  mutate(ad_sector_codes = str_split(ad_sector_codes, "\\|")) %>%
+  unnest(ad_sector_codes) %>%
+  
+  # Step 2: Perform spatial join with water stress data
+  st_join(grid_intersect_bws_test_sf, join = st_intersects) %>%
+  
+  # Step 3: Count sectors by water stress category
+  count(ad_sector_codes, bws_cat) %>%
+  
+  # Step 4: Join with sector names for clarity
+  left_join(wb_sector_trans_crosswalk, by = c("ad_sector_codes" = "ad_sector_codes")) %>%
+  
+  # Step 5: Arrange for better readability
+  arrange(bws_cat, desc(n))
+
+# Step 6: Display or further process the result
+print(sector_distribution)
+```
+the NA value are also in the islands only, we don't need to fix it
+
+# Safeguard the data
+CONTROL VARIABLE
+- Precipitation: agg_prec for overall average and avg_monthly_prec_wide (monthly), avg_yearly_prec_long and avg_yearly_prec_wide (yearly)
+- Population (extrapolated): taking the count data, interpolated_pop_wide_grid_df, interpolated_long_wide_grid_df
+- Temperature : temp_data_filtered (overall average), avg_monthly_temp (monthly data), avg_yearly_temp (yearly data)
+- cropland: cropland_glad_grid_df (with different 2003, 2007, 2011, 2015 and 2019), cropland_wc_grid_df (just cross-section)
+Note: we don't use the agriculture production in this case, because of lack of yearly production (only data in 2015)
+  extrapolated data: interpolated_cropland_long_grid_df, interpolated_cropland_wide_grid_df
+
+
+OTHER DATA
+two datasets: merged_grid and grid_intersect and grid_intersect_bws_test
+grid_intersect needs to be subsetted 
+
+
+In order to merge, use the long format dataset, so the data frame would have a column for year and its value, but one problem is, not all row will have the data, what to do?
+current a little bit struggling, why not try to merge the data of the control variable first? merged_control
+
+## Control variables
+for the period of 1989 to 2020, because 1989 is the starting period of the record of the WB project
+```{r}
+# interpolated_pop_long_grid_df <- read_csv("./Data/data-processed/interpolated_pop_long_1989_2020_with_variation_incomplete_cells.csv.gz")
+
+# Creating a merging control variable data frame
+
+merged_control <- interpolated_pop_long_grid_df %>%
+  left_join(avg_yearly_prec_long, by = c("grid_id", "year")) %>%
+  left_join(avg_yearly_temp, by = c("grid_id", "year")) %>%
+  left_join(interpolated_cropland_long_grid_df, by = c("grid_id", "year"))
+
+# write_csv(merged_control, "./Data/data-processed/merged_control_incomplete_cells.csv.gz")
+```
+
+
+## The rest
+
+conflict data frame: conflict_grid_counts
+project data frame: wb_detail_grided
+```{r}
+
+country_df <- country_sf %>%
+  st_drop_geometry()
+
+# Merge datasets
+
+grid_final_df <- merged_control %>%
+  # Administrative data
+  left_join(country_df, by = "grid_id") %>%
+  #Water stress data
+  left_join(grid_intersect_bws_test_df, by = "grid_id") %>%
+  # Conflict data
+  left_join(conflict_grid_manipulated, by = c("grid_id", "year")) %>% 
+  left_join(extrapolated_gdp_grid_until_2020, by = c("grid_id", "year")) %>%
+  mutate(log_gdp = log(gdp + 1),
+         conflicts_count = ifelse(is.na(conflicts_count), 0, conflicts_count),
+         conflict_dummy = ifelse(conflicts_count > 0, 1, 0),
+         state_based_count = ifelse(is.na(state_based_count), 0, state_based_count),
+         non_state_count = ifelse(is.na(non_state_count), 0, non_state_count),
+         one_sided_count = ifelse(is.na(one_sided_count), 0, one_sided_count),
+         deaths_a_count = ifelse(is.na(deaths_a_count), 0, deaths_a_count),
+         deaths_b_count = ifelse(is.na(deaths_b_count), 0, deaths_b_count),
+         deaths_civilians_count = ifelse(is.na(deaths_civilians_count), 0, deaths_civilians_count),
+         deaths_unknown_count = ifelse(is.na(deaths_unknown_count), 0, deaths_unknown_count),
+         best_death_count = ifelse(is.na(best_death_count), 0, best_death_count),
+         high_death_count = ifelse(is.na(high_death_count), 0, high_death_count),
+         low_death_count = ifelse(is.na(low_death_count), 0, low_death_count),
+         # conflict_dummy = as.factor(conflict_dummy),
+         ) %>%
+  # left_join(grid_intersect_bws_monthly_test_df, by = "grid_id") %>%
+  left_join(wb_detail_grided_final, by = c("grid_id", "year")) %>%
+  mutate(
+    # total_disbur = ifelse(is.na(total_disbur), 0, total_disbur),
+    total_commi = ifelse(is.na(total_commi), 0, total_commi), 
+    project_count = ifelse(is.na(project_count), 0, project_count),
+    project_dummy = ifelse(project_count > 0, 1, 0),
+    project_dummy = as.factor(project_dummy),
+    project_location_count = ifelse(is.na(project_location_count), 0, project_location_count),
+    project_location_dummy = ifelse(project_location_count > 0, 1, 0),
+    project_location_dummy = as.factor(project_location_dummy),
+    project_location_water_count = ifelse(is.na(project_location_water_count), 0, project_location_water_count),
+    project_location_water_dummy = ifelse(project_location_water_count >= 1, 1, 0),
+    project_location_water_dummy = as.factor(project_location_water_dummy),
+    project_location_other_count = ifelse(is.na(project_location_other_count), 0, project_location_other_count),
+    # create dummy variable for project_location_type, 0 means no project of either type, 1 means project_location_water_count > 0 and project_location_other_count = 0, 2 means project_location_other_count > 0 and project_location_water_count = 0, 3 means both project_location_water_count > 0 and project_location_other_count > 0
+    project_location_type_dummy = as.factor(case_when(
+      project_location_water_count > 0 & project_location_other_count == 0 ~ 1,
+      project_location_other_count > 0 & project_location_water_count == 0 ~ 2,
+      project_location_water_count > 0 & project_location_other_count > 0 ~ 3,
+      TRUE ~ 0
+    )),
+    # create label variable call project_location_type_dummy_label for it
+    project_location_type_dummy_label = as.factor(case_when(
+      project_location_type_dummy == 0 ~ "No project",
+      project_location_type_dummy == 1 ~ "only water",
+      project_location_type_dummy == 2 ~ "only other",
+      project_location_type_dummy == 3 ~ "Both water and other"
+    )),
+    GID_2 = as.factor(GID_2),
+    GID_1 = as.factor(GID_1),
+    # ratio_commi_disbur = total_disbur / total_commi,
+    bws_cat = as.factor(bws_cat),
+    agg_wb_transactions_end_year = as.numeric(agg_wb_transactions_end_year),
+    # agg_wb_start_month = as.numeric(agg_wb_start_month),
+    # agg_wb_end_month = as.numeric(agg_wb_end_month),
+    grid_id = as.factor(grid_id),
+    avg_project_duration = ifelse(is.na(avg_project_duration), 0, avg_project_duration),
+    log_pop = log(population),
+    # log_disbur = log(total_disbur + 1),
+    log_commi = log(total_commi + 1)
+  ) %>%
+  # limit the year until 2014 only
+  dplyr::filter(year <= 2014) %>%
+  mutate(
+    year = as.factor(year)
+  )
+
+grid_final_df_filtered <- grid_final_df 
+grid_final_df_filtered$year <- as.numeric(as.character(grid_final_df_filtered$year))
+grid_final_df_filtered <- grid_final_df_filtered %>%
+  filter(year >= 1995)
+```
+
+## Check
+```{r}
+# # Check for infinite values across all columns in grid_final_df
+# infinite_summary <- grid_final_df %>%
+#   summarise(across(everything(), ~ sum(is.infinite(.))))
+# 
+# # Identify columns with infinite values
+# columns_with_infinite <- names(infinite_summary)[infinite_summary > 0]
+# 
+# # Output the result
+# if (length(columns_with_infinite) > 0) {
+#   message("Infinite values found in the following columns:")
+#   print(infinite_summary[infinite_summary > 0])
+# } else {
+#   message("No infinite values found in the dataset.")
+# }
+
+
+```
+
+
+## Saving
+Merging the grid_final_df with the merged_control
+```{r}
+# Save the dataframe to an RDS file
+saveRDS(grid_final_df, file = "./Data/data-r4r/grid_df_incomplete_cells_lka_10.rds")
+```
+
+
+Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+  0.000   0.070   0.352   0.393   0.721   1.460    4091 
+  
+Comment: if the median of disbursement / commitment is 0.352 on median then it means that most project disburse less money than they committed/promised  
+  
+
+
+# Visualization
+```{r}
+# # Plot using ggplot
+# grid_example <- ggplot(data = grid_final) +
+#   geom_sf(color = "black", fill = NA) +  # Plot the grid lines with no fill
+#   theme_minimal() +  # Apply a minimal theme
+#   labs(
+#     title = "Grid Visualization"
+#   ) +
+#   coord_sf()  # Ensures correct spatial rendering
+# 
+# grid_example
+# 
+# ggsave("./Data/export/grid_example.pdf", plot = grid_example, width = 6, height = 4)
+
+```
+
+
+```{r}
+# # Ensure the shapefile is in the correct CRS
+# ws_subdistrict_country <- st_transform(ws_subdistrict_country, crs = 4326)  # Using WGS84
+# 
+# 
+# 
+# 
+# 
+# summary_stats <- summary(level_1a_wb_country_sf$even_split_disbursements)
+# min_val <- summary_stats["Min."]
+# q1_val <- summary_stats["1st Qu."]
+# median_val <- summary_stats["Median"]
+# q3_val <- summary_stats["3rd Qu."]
+# max_val <- summary_stats["Max."]
+# 
+# 
+# plot_country_subdistrict <- ggplot() +
+#   geom_sf(data = ws_subdistrict_country, aes(fill = bws), color = "black", size = 0.2) +
+#   scale_fill_gradient(low = "white", high = "red", name = "Water Stress") +
+#   geom_sf(data = geo_event_ucdp_country_sf, aes(color = "Conflict/Violence"), size = 2, alpha = 0.6) +
+#   geom_sf(data = level_1a_wb_country_sf, aes(color = "World Bank Project", size = even_split_disbursements), alpha = 0.6) +
+#   scale_color_manual(name = "Location type", 
+#                      values = c("Conflict/Violence" = "blue", "World Bank Project" = "orange")) +
+#     # Size scale for total commitments
+#   scale_size_continuous(
+#     name = "Total Commitments",
+#     breaks = c(min_val, q1_val, median_val, q3_val, max_val),
+#     labels = c("Min", "Q1", "Median", "Q3", "Max"),
+#     range = c(1, 10)
+#   ) +
+#   labs(title = "Conflict/Violence Event Locations and World Bank Projects in country",
+#        subtitle = "Overlay of events on subdistrict base map with water stress levels",
+#        x = "Longitude",
+#        y = "Latitude") +
+#   theme_minimal()
+# 
+# plot_country_water_bassin6 <- ggplot() +
+#   geom_sf(data = ws_original_filtered, aes(fill = bws_cat), color = "black", size = 0.2) +
+#   scale_fill_gradient(low = "white", high = "red", name = "Water Stress") +
+#   geom_sf(data = geo_event_ucdp_country_sf, aes(color = "Conflict/Violence"), size = 2, alpha = 0.6) +
+#   geom_sf(data = level_1a_wb_country_sf, aes(color = "World Bank Project"), size = 2, alpha = 0.6) +
+#   scale_color_manual(name = "Location type", 
+#                      values = c("Conflict/Violence" = "blue", "World Bank Project" = "orange")) +
+#   labs(title = "Conflict/Violence Event Locations and World Bank Projects in country",
+#        subtitle = "Overlay of events on subdistrict base map with water stress levels",
+#        x = "Longitude",
+#        y = "Latitude") +
+#   theme_minimal()
+# 
+# 
+# 
+# plot_country_subdistrict
+# plot_country_water_bassin6
+```
+
+
+For the moment I did not filter the project that is based on water and sanitization, so I should do it
+
+## Water and sanitization filter
+```{r}
+# # Assuming 'even_split_disbursements' is the variable representing the size of disbursements
+# min_val <- min(level_1a_wb_country_water_sf$even_split_disbursements, na.rm = TRUE)
+# q1_val <- quantile(level_1a_wb_country_water_sf$even_split_disbursements, 0.25, na.rm = TRUE)
+# median_val <- median(level_1a_wb_country_water_sf$even_split_disbursements, na.rm = TRUE)
+# q3_val <- quantile(level_1a_wb_country_water_sf$even_split_disbursements, 0.75, na.rm = TRUE)
+# max_val <- max(level_1a_wb_country_water_sf$even_split_disbursements, na.rm = TRUE)
+# 
+# 
+# plot_country_water_bassin6_baseline <- ggplot() + 
+#   geom_sf(data = grid_intersect_bws_test, aes(fill = bws_cat), color = "black", size = 0.2) +
+#   scale_fill_manual(values = c("white", "yellow", "orange", "red", "darkred", "purple"), 
+#                     name = "Water Stress") +
+#   theme_minimal()
+# # then doing the visualization again
+# plot_country_grid <- ggplot() +
+#   geom_sf(data = grid_intersect_bws_test, aes(fill = bws), color = "black", size = 0.2) +
+#   scale_fill_gradient(low = "white", high = "red", name = "Water Stress") +
+#   geom_sf(data = geo_event_ucdp_country_sf, aes(color = "Conflict/Violence"), size = 2, alpha = 0.6) +
+#   geom_sf(data = level_1a_wb_country_water_sf, aes(color = "World Bank Project", size = even_split_disbursements), alpha = 0.6) +
+#   scale_color_manual(name = "Location type", 
+#                      values = c("Conflict/Violence" = "blue", "World Bank Project" = "orange")) +
+#     # Size scale for total commitments
+#   scale_size_continuous(
+#     name = "Total Commitments",
+#     breaks = c(min_val, q1_val, median_val, q3_val, max_val),
+#     labels = c("Min", "Q1", "Median", "Q3", "Max"),
+#     range = c(1, 10)
+#   ) +
+#   labs(title = "Conflict/Violence Event Locations and World Bank Projects in country",
+#        subtitle = "Overlay of events on subdistrict base map with water stress levels",
+#        x = "Longitude",
+#        y = "Latitude") +
+#   theme_minimal()
+# 
+# plot_country_water_bassin6_adv <- ggplot() +
+#   geom_sf(data = grid_intersect_bws_test, aes(fill = bws_cat), color = "black", size = 0.2) +
+#   scale_fill_manual(values = c("white", "yellow", "orange", "red", "darkred", "purple"), name = "Water Stress") +  # Use manual color scale
+#   geom_sf(data = geo_event_ucdp_country_sf, aes(color = "Conflict/Violence"), size = 2, alpha = 0.6) +
+#   geom_sf(data = level_1a_wb_country_water_sf, aes(color = "World Bank Project", size = even_split_disbursements), alpha = 0.6) +
+#   scale_color_manual(name = "Location type", 
+#                      values = c("Conflict/Violence" = "blue", "World Bank Project" = "orange")) +
+#   labs(title = "Conflict/Violence Event Locations and World Bank Projects in country",
+#        subtitle = "Overlay of events on subdistrict base map with water stress levels",
+#        x = "Longitude",
+#        y = "Latitude") +
+#   theme_minimal()
+# 
+# plot_country_water_bassin6_baseline
+# plot_country_water_bassin6_adv
+
+```
+
+Comment from this graph: as you can see conflicts seem not to concentrate from the place with most water stress (the western region in country), so what happens here? 
+Of course the conflicts are based on other factors as well, like preferential treatment of one group compared to other group, language different, 
+
+
+## Ethnic and Linguistic data
+The datas are 
+- ethnic_geo_ref_2010_eth (geo-referencing of Ethnic groups) 8969 obs - it is not filtered to country yet, this seems to be unusable
+  the ethnic group is coded based on one of the six settlement pattern 
+- political_ethnic_country_epr_eth (ethnic group with relevant political power in country) 280 obs, maybe using the original data is a good idea (geo_ethnic_power_geoepr_eth)
+- geo_ethnic_power_geoepr_country_eth (76 obs) (with polygon reference)
+- conflict_ethnic_acd2epr_country_eth (Conflict btw Ethnic) - only 33 obs -> not really interesting
+- Ethno-Linguistic, religious and 
+
+The second and the third data go along together
+
+Faster example of visualization: https://growup.ethz.ch/pfe/country
+The data now is political_ethnic_country_epr_eth_filtered
+
+```{r}
+# # Filter out rows 1, 2, and 21
+# filtered_data <- political_ethnic_country_epr_eth_filtered[-c(16, 20, 21), ]
+# 
+# # Create the plot
+# plot_country_single_ethnic <- ggplot() +   
+#   geom_sf(data = grid_intersect_bws_test, color = "black", size = 0.2, fill = NA) +
+#   geom_sf(data = filtered_data, color = "red", size = 0.5, fill = NA) + # Highlight in red or any desired color
+#   geom_sf_text(data = filtered_data, aes(label = group), size = 3, color = "blue") + # Add labels
+#   theme_minimal() +
+#   labs(title = "Map of country Highlighting Specific Ethnic Power Rows (Excluding Rows 1, 2, 21)",
+#        x = "Longitude",
+#        y = "Latitude")
+# 
+# # Display the plot
+# plot_country_single_ethnic
+# 
+# # for the visualization
+```
+
+## Project and grid
+```{r}
+# # visualize the project from level_1a_wb_country_sf and grid from country_sf together, just put country_sf as background and all the project location as dot ontop of it
+# plot_country_project_grid_level_1a <- ggplot() +
+#   geom_sf(data = country_sf, fill = "lightblue", color = "black") +                     # Background grid
+#   geom_sf(data = level_1a_wb_country_manipulated_sf, aes(color = "World Bank Project"), size = 0.7) +  # Project locations
+#   theme_minimal() +
+#   labs(title = "World Bank Projects in country level1a", fill = "Project Location level1a") +
+#   theme(legend.position = "none")  # Remove legend if not needed
+# 
+# plot_country_project_grid_locations_wb <- ggplot() +
+#   geom_sf(data = country_sf, fill = "lightblue", color = "black") +                     # Background grid
+#   geom_sf(data = locations_wb_country_manipulated_sf, aes(color = "World Bank Project"), size = 0.7) +  # Project locations
+#   theme_minimal() +
+#   labs(title = "World Bank Projects in country locations_wb", fill = "Project Location locations_wb") +
+#   theme(legend.position = "none")  # Remove legend if not needed
+# 
+# plot_country_project_grid;plot_country_project_grid_locations_wb
+```
+
+## Leaflet
+DIY later
+
+
+# Saving the environement
+```{r}
+# base::save.image(file = "./streamlined_v2.RData")
+
+```
+
+# Some comments
+07.10.2024: in the process of doing the grid intersection and extrapolating the data for each grid, some of the grids get the NA. Solution for that is that you do the visual inspection and approximate it to the neighboring grids. 

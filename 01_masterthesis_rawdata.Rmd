@@ -1,0 +1,1522 @@
+---
+title: "Masterthesis_LMH"
+author: "Le Minh Hoang"
+date: "2024-06-18"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Package
+```{r pressure, echo = FALSE}
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")
+}
+#gdgfdgfd
+pacman::p_load(
+  fixest, haven, modelsummary, tidyverse, readxl, dplyr, plm, stargazer, IDPmisc, lfe, here, sandwich, AER, 
+  dynlm, forecast, scales, nlme, lmtest, pdynmc, dynpanel, rstudioapi, xtable, estimatr, zoo, skimr, rvest, 
+  exactextractr, sf, raster, geodata, stringr, parallel, osmdata, osmextract, wbstats, spatialreg, spData, 
+  spdep, leaflet, RColorBrewer, ncdf4, rnaturalearth, patchwork, WDI, httr, jsonlite, tidytext, lintr, 
+  pdftools, purrr, tm, writexl, SnowballC, gridExtra
+)
+
+```
+
+# Unzip the data and loading necessary packages
+
+```{r}
+# rm(list=ls())
+
+# #load the data for whole world 
+# # Read the data without specifying column names
+# wb_project_2024 <- read_xls("./Data/World Bank project/wb_project_all.xls", sheet = 1, col_names = FALSE)
+# 
+# # Set the column names to the values in the third row
+# colnames(wb_project_2024) <- wb_project_2024[3, ]
+# 
+# # Remove the first three rows from the data
+# wb_project_2024 <- wb_project_2024[-c(1, 2, 3), ]
+# 
+# # Convert the data frame to ensure the types are correct
+# wb_project__2024 <- type.convert(wb_project_2024, as.is = TRUE)
+# 
+# ## Only for India 
+# wb_project_india_2024 <- read_xlsx("./Data/World Bank project/wb_project_india.xlsx", sheet = 1, col_names = FALSE)
+# 
+# # Set the column names to the values in the third row
+# colnames(wb_project_india_2024) <- wb_project_india_2024[1, ]
+# 
+# # Remove the first three rows from the data
+# wb_project_india_2024 <- wb_project_india_2024[-c(1), ]
+# 
+# # Convert the data frame to ensure the types are correct
+# wb_project_india_2024 <- type.convert(wb_project_india_2024, as.is = TRUE)
+
+#comment: the data downloaded directly from the World Bank website (https://projects.worldbank.org/en/projects-operations/projects-list) seems to be very lack in the content of the data. Try something else maybe? Mr. Dannemann's suggestion for example. Note on 28th Nov 2024: we don't use this data because it's not complete in terms of covariate, we use the Aiddata instead.
+
+# # load the data in Mr. Dannemann's suggestion
+# dest <- "./Data/World Bank project/aiddata.zip"
+# if (!file.exists(dest)) {
+#   file <- "https://github.com/AidData-WM/public_datasets/blob/master/geocoded/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip?raw=true"
+# 
+#   utils::download.file(url = file,
+#                        destfile = dest)
+# 
+#   utils::unzip(zipfile = dest, exdir = dirname(dest))
+# }
+# 
+# utils::unzip(zipfile = dest, exdir = dirname("./Data/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip"))
+# 
+# # Ensure the zip file path is correct
+# zipfile <- "./Data/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip"
+# if (!file.exists(zipfile)) {
+#   stop("The zip file does not exist at the specified path.")
+# }
+# 
+# # Destination directory for unzipping
+# exdir <- "./Data/World Bank project"
+# 
+# # Try using the utils::unzip function
+# tryCatch({
+#   utils::unzip(zipfile = zipfile, exdir = exdir)
+# }, warning = function(w) {
+#   message("Warning in utils::unzip: ", conditionMessage(w))
+# }, error = function(e) {
+#   message("Error in utils::unzip: ", conditionMessage(e))
+#   # Fallback to using the zip package
+#   install.packages("zip")
+#   library(zip)
+#   zip::unzip(zipfile = zipfile, exdir = exdir)
+# })
+
+```
+
+# Geography of country subjects
+country codes are c("AFG", "BGD", "BTN", "IND", "NPL", "PAK", "LKA")
+second run: only run AFG, BGD, IND, NPL and PAK, BTN and LKR does not have enough data
+```{r pressure, echo = F}
+country_code_3_letter <- "LKA"
+country_name <- c("Sri Lanka")
+# Continent mapping for countries
+mapping_continent <- read.csv("./Data/data-raw/mapping countries continents/country-and-continent-codes-list-csv.csv")
+colnames(mapping_continent) <- tolower(colnames(mapping_continent))
+country_code_2_number <- mapping_continent$country_number[match(country_code_3_letter, mapping_continent$gid_0)]
+country_code_2_letter <- mapping_continent$two_letter_country_code[
+  match(country_code_3_letter, mapping_continent$gid_0)
+]
+
+# Fetch geographical data for India
+outline_lv2 <- geodata::gadm(country = country_code_3_letter, level = 2, path = "./Data/data-raw/")
+outline_lv1 <- geodata::gadm(country = country_code_3_letter, level = 1, path = "./Data/data-raw/")
+outline_lv0 <- geodata::gadm(country = country_code_3_letter, level = 0, path = "./Data/data-raw/")
+
+# Convert SpatVector to sf object
+country_gid_2_sf <- st_as_sf(outline_lv2)
+country_gid_1_sf <- st_as_sf(outline_lv1)
+country_gid_0_sf <- st_as_sf(outline_lv0)
+
+
+# Visualize india_gid_1_sf
+ggplot(country_gid_0_sf) +
+  geom_sf() +
+  labs(title = "Level 0 Administrative Boundaries")
+
+
+```
+
+# Precipitation
+https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/fews/web/global/monthly/chirps/final/downloads/monthly/
+```{r pressure, echo = FALSE}
+# # download the precipitation data--------------------  DONE
+# dir.create("./Data/chirps", showWarnings = F, recursive = T)
+# url <- "https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/fews/web/global/monthly/chirps/final/downloads/monthly/"
+# 
+# # Retrieve links from HTML file ------------------------------------------
+# download.file(url = url,
+#               destfile = paste("./Data/chirps", "index.html", sep = "/"))
+# 
+# html <- read_html(file.path("./Data/chirps", "index.html"))
+# links <- as.list(html_nodes(html, xpath = '//*[contains(@href, ".tif.gz")]') %>% html_attr("href"))
+# 
+# # Download the files
+# lapply(links[1:514], function(link) {
+#   download.file(paste0(url, link), destfile = paste0("./Data/chirps/", basename(link)))
+# })
+# files <- list.files("./Data/chirps", pattern = ".gz$",full.names = T)
+# 
+# lapply(files, function(f){
+#   R.utils::gunzip(f)
+# })
+
+```
+
+# Population
+source (density):
+<https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-density-rev11>
+this is the population of 2020
+
+The Gridded Population of the World, Version 4 (GPWv4): Population Density, Revision 11 consists of estimates of human population density (number of persons per square kilometer) based on counts consistent with national censuses and population registers, for the years 2000, 2005, 2010, 2015, and 2020. A proportional allocation gridding algorithm, utilizing approximately 13.5 million national and sub-national administrative units, was used to assign population counts to 30 arc-second grid cells. The population density rasters were created by dividing the population count raster for a given target year by the land area raster. The data files were produced as global rasters at 30 arc-second (~1 km at the equator) resolution. To enable faster global processing, and in support of research communities, the 30 arc-second count data were aggregated to 2.5 arc-minute, 15 arc-minute, 30 arc-minute and 1 degree resolutions to produce density rasters at these resolutions.
+
+Count:
+https://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-count-rev11
+The Gridded Population of the World, Version 4 (GPWv4): Population Count, Revision 11 consists of estimates of human population (number of persons per pixel), consistent with national censuses and population registers, for the years 2000, 2005, 2010, 2015, and 2020. A proportional allocation gridding algorithm, utilizing approximately 13.5 million national and sub-national administrative Units, was used to assign population counts to 30 arc-second grid cells. The data files were produced as global rasters at 30 arc-second (~1 km at the equator) resolution. To enable faster global processing, and in support of research commUnities, the 30 arc-second data were aggregated to 2.5 arc-minute, 15 arc-minute, 30 arc-minute and 1 degree resolutions.
+
+Population growth rate from 1989 to 1999 (World Bank):
+https://databank.worldbank.org/reports.aspx?source=2&series=SP.POP.GROW&country=
+
+# Temperature
+source: https://crudata.uea.ac.uk/cru/data/hrg/cru_ts_4.07/ge/
+
+# GDP
+source: https://sedac.ciesin.columbia.edu/data/set/sdp-downscaled-gdp-grid-b2-1990-2025
+ Abstract:
+    The Global 15x15 Minute Grids of the Downscaled GDP Based on the Special Report on Emissions Scenarios (SRES) B2 Scenario, 1990 and 2025, are geospatial distributions of Gross Domestic Product (GDP) per unit area (GDP densities). These global grids were generated using the Country-level GDP and Downscaled Projections Based on the SRES B2 Scenario, 1990-2100 data set, and CIESIN's Gridded Population of World, Version 2 (GPWv2) data set as the base map. First, the GDP per capita was developed at a country-level for 1990 and 2025. Then the gridded GDP was developed within each country by applying the GDP per capita to each grid cell of the GPW, under the assumption that the GDP per capita was uniform within a country. This data set is produced and distributed by the Columbia University Center for International Earth Science Information Network (CIESIN).
+    
+the grid data has data for 1990 and 2025 (prediction), so I wil extrapolate the data to generate (simulation) the data of gdp between 1990 and 2025 (for each year) with the growth rate from the world bank 
+
+GDP prediction based on scenario B2 
+https://sedac.ciesin.columbia.edu/data/set/sdp-downscaled-gdp-a1a2b1b2-1990-2100
+The Country-Level GDP and Downscaled Projections Based on the Special Report on Emissions Scenarios (SRES) A1, A2, B1, and B2 marker scenarios, 1990-2100, were developed using the 1990 base year GDP (Gross Domestic Product) from national accounts database available from the UN Statistics Division. SRES regional GDP growth rates were calculated from 1990 to 2100 based on the SRES marker model regional data and applied uniformly to each country that fell within the SRES-defined regions. This data set is produced and distributed by the Columbia University Center for International Earth Science Information Network (CIESIN).
+
+GDP growth rate (WB): https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG
+
+# Agriculture
+https://www-nature-com.proxy02a.bis.uni-oldenburg.de/articles/s41597-021-01115-2
+
+For each country, we extracted the production for each crop from the FAOSTAT database (http://www.fao.org/faostat/en/#data/QC; data downloaded April 2020). We averaged three years (2009-2011) of annual national crop production data to represent 2010 national crop production, and
+2 three years (2014-2016) of annual national crop production data to represent 2015 national crop production 
+
+# Cropland
+Cropland distribution data at a 30-seconds spatial resolution from three sources:
+worldcover is derived from the ESA WorldCover data set at 0.3-seconds resolution. (License CC BY 4.0), see https://esa-worldcover.org/en. Values were aggregated and represent the fraction cropland in each cell.
+
+glad is derived from the "Global cropland expansion in the 21st century" (Potatov et al) data available here. Values were aggregated and resampled. They represent the fraction cropland in each cell. There are five layers representing the following years: 2003, 2007, 2011, 2015, and 2019.
+
+QED has cropland distribution data for Africa. The values are probabilities of cropland presence estimated with a neural network that was trained on an initial 1-million point Geosurvey conducted in 2015. License: CC-BY-SA 4.0; https://about.maps.qed.ai/
+
+For Glad
+The dataset represents a globally consistent cropland extent time-series at 30-m spatial resolution. Cropland defined as land used for annual and perennial herbaceous crops for human consumption, forage (including hay), and biofuel. Perennial woody crops, permanent pastures, and shifting cultivation are excluded from the definition. The fallow length is limited to four years for the cropland class. The cropland mapping was done using the consistently processed Landsat satellite data archive from 2000 to 2019. The Landsat time-series data were transformed into multitemporal metrics that described land surface phenology. These metrics were used as independent variables for a machine learning classification to map global croplands extent. The classification models were locally calibrated using extensive training data collected by visual interpretation of freely available high spatial resolution remotely sensed data. The crop mapping was performed in four-year intervals (2000-2003, 2004-2007, 2008-2011, 2012-2015, and 2016-2019). There is one cropland layer per epoch (five layers total), with the file name referred to the last year of the interval (2003, 2007, 2011, 2015, and 2019).
+Dataset Reference
+
+P. Potapov, S. Turubanova, M.C. Hansen, A. Tyukavina, V. Zalles, A. Khan, X.-P. Song, A. Pickens, Q. Shen, J. Cortez. (2021) Global maps of cropland extent and change show accelerated cropland expansion in the twenty-first century. Nature Food. 
+```{r pressure, echo= F}
+# #downloading all the data glad
+# geodata::cropland("glad", path = "./Data/data-raw/cropland/glad", year = 2019)
+# 
+# # downloading all the data of World cover
+# 
+# geodata::cropland("WorldCover", path = "./Data/data-raw/cropland/WorldCover")
+
+```
+
+# World Bank related
+World Bank. 2017. AidData | World Bank Geocoded Research Release, Version 1.4.2, https://www.aiddata.org/data/world-bank-geocoded-research-release-level-1-v1-4-2 (date last accessed 19 June 2024)
+Some comments when looking at the data
+- level_1a is prejoined subnational locations & projects table with equal location splits of financial amounts
+- The data of the locations_wb is already included in the level_1a, but there is less obs than the level_1a 
+
+project_ancillary_wb has information regarding the investment instrument of each project, as well as the targeted sectors, who are the borrower, etc. The identifiers are individual project, unlike the level_1a with exat location of where the project are operated.
+
+Comment of the authors about the project_ancillary.csv:
+The file projects_ancillary.csv contains all fields that are found in exports from the World Bank project database. The ancillary table also includes all IEG evaluations that have been conducted on World Bank projects approved from 1995-2014 and all supervision and completion costs on projects approved from 2000-2014.
+
+There is also the data of the WB about the foreign aid data, let's take a look as well
+
+
+```{r}
+level_1a_wb <- read.csv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/data/level_1a.csv")
+locations_wb <- read.csv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/data/locations.csv") # this dataset is not neccessary because it is part of level_1a
+projects_wb <- read.csv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/data/projects.csv")
+projects_ancillary_wb <- read.csv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/data/projects_ancillary.csv")
+transactions_wb <- read.csv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/data/transactions.csv")
+
+
+
+#############################
+level_1a_wb_country <- filter(level_1a_wb, recipients_iso3 %in% country_code_3_letter)
+# Check for empty values in latitude and longitude columns
+empty_rows <- which(is.na(level_1a_wb_country$latitude) | is.na(level_1a_wb_country$longitude))
+
+# Remove rows where latitude or longitude is empty
+level_1a_wb_country <- level_1a_wb_country[-empty_rows, ]
+level_1a_wb_country_sf <- st_as_sf(level_1a_wb_country, coords = c("longitude", "latitude"), crs = 4326)
+level_1a_wb_country_sf$donors <- as.factor(level_1a_wb_country_sf$donors)
+
+###################################
+# Subset the data for projects_ancillary
+projects_ancillary_wb_country <- subset(projects_ancillary_wb, COUNTRY %in% country_name)
+
+# For projects_wb, filter the data to only include projects in India by match the identifier project_id with the project_id in projects_ancillary_wb_india (old text)
+projects_wb_country<- subset(projects_wb, project_id %in% projects_ancillary_wb_country$PROJECT.ID)
+projects_wb_country$project_duration <- projects_wb_country$transactions_end_year - projects_wb_country$transactions_start_year
+
+########################################
+# for locations_wb, filter the data to only include locations in India by filtering the IN countrycode in gazetteer_adm_code
+locations_wb_country <- subset(locations_wb, grepl(country_code_2_letter, gazetteer_adm_code))
+
+# adding the year
+locations_wb_country <- locations_wb_country %>%
+  left_join(
+    subset(projects_wb_country, select = c("project_id", "transactions_start_year", "transactions_end_year", "total_commitments", "ad_sector_codes", "ad_sector_names")),
+           by = "project_id") %>%
+  group_by(project_id) %>%
+  mutate(even_split_commitments = total_commitments / n()) %>%
+  ungroup() %>%
+  dplyr::select(-total_commitments)
+
+locations_wb_country_sf <- st_as_sf(locations_wb_country, coords = c("longitude", "latitude"), crs = 4326)
+
+
+# aid to gdp ratio data
+aid_gdp_ratio_wb <- read.csv("./Data/data-raw/gdp/aid_gdp_ratio_wb/aid_gdp_ratio_wb.csv")
+
+```
+
+By investigating the data, we can see that most the of the lending instrument is "specific investment loan", with the lending instrument type mostly being "Investment" with a small minority being "development policy lending"
+
+
+
+### Visualization
+```{r}
+
+# Visualize the evolution of GDP, net development assistance, and the aid to GDP ratio for India
+
+# visualize the graps for India, Bangladesh, Cambodia, China, Laos, Myanmar, Pakistan, Sri Lanka, Thailand, Vietnam, and South Korea
+# c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")
+
+# 
+# # GDP over time
+# gdp_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "GDP Over Time for Developping Asia", 
+#        x = "Year", 
+#        y = "GDP", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # Net official development assistance and official aid received (current US$)
+# net_dev_assit_aid_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = net_dev_assist_aid, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Net ODA and official aid received for Developping Asia", 
+#        x = "Year", 
+#        y = "Net ODA & aid received in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net inflow 
+# fdi_inflow_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = fdi_net_inflow, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Inflow overtime in current USD", 
+#        x = "Year", 
+#        y = "FDI Net Inflow in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net inflow to GDP ratio
+# fdi_inflow_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = fdi_net_inflow_per_gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Inflow to GDP ratio", 
+#        x = "Year", 
+#        y = "FDI Net Inflow to GDP Ratio", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net outflow
+# fdi_net_outflow_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = fdi_net_outflow, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Outflow overtime in current USD", 
+#        x = "Year", 
+#        y = "FDI Net Outflow in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net outflow to GDP ratio
+# fdi_outflow_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = fdi_net_outflow_per_gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Outflow to GDP ratio", 
+#        x = "Year", 
+#        y = "FDI Net Outflow to GDP Ratio", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+#   # aid to gdp ratio
+# aid_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+#        aes(x = as.numeric(year), y = aid_gdp_ratio, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Net ODA & aid to GDP Ratio", 
+#        x = "Year", 
+#        y = "Net ODA & aid to GDP ratio", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+#   ## india only------------------------------------------------------------------
+# gdp_graph_india <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "GDP Over Time for India", 
+#        x = "Year", 
+#        y = "GDP", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # Net official development assistance and official aid received (current US$)
+# net_dev_assit_aid_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = net_dev_assist_aid, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Net ODA and official aid received for India", 
+#        x = "Year", 
+#        y = "Net ODA & aid received in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net inflow
+# fdi_inflow_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = fdi_net_inflow, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Inflow overtime in current USD for India", 
+#        x = "Year", 
+#        y = "FDI Net Inflow in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net inflow to GDP ratio
+# fdi_inflow_gdp_ratio_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = fdi_net_inflow_per_gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Inflow to GDP ratio for India", 
+#        x = "Year", 
+#        y = "FDI Net Inflow to GDP Ratio", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net outflow
+# fdi_net_outflow_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = fdi_net_outflow, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Outflow overtime in current USD for India", 
+#        x = "Year", 
+#        y = "FDI Net Outflow in current USD", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+# # FDI net outflow to GDP ratio
+# fdi_outflow_gdp_ratio_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#        aes(x = as.numeric(year), y = fdi_net_outflow_per_gdp, color = country_name)) +
+#   geom_line() +
+#   labs(title = "Foreign Direct Investment Net Outflow to GDP ratio for India", 
+#        x = "Year", 
+#        y = "FDI Net Outflow to GDP Ratio", 
+#        color = "Country") +
+#   theme_minimal()
+# 
+#   # aid to gdp ratio
+# aid_gdp_ratio_india_graph <-  ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+#          aes(x = as.numeric(year), y = aid_gdp_ratio, color = country_name)) +
+#     geom_line() +
+#     labs(title = "Aid to GDP Ratio Over Time for India", 
+#          x = "Year", 
+#          y = "Net ODA & aid to GDP ratio", 
+#          color = "Country") +
+#     theme_minimal()
+# 
+# # for developping Asia
+# ggsave("./figures/plot_gdp.pdf", plot = gdp_graph)
+# ggsave("./figures/plot_net_dev_assist_aid.pdf", plot = net_dev_assit_aid_graph)
+# ggsave("./figures/plot_fdi_inflow.pdf", plot = fdi_inflow_graph)
+# ggsave("./figures/plot_fdi_inflow_gdp_ratio.pdf", plot = fdi_inflow_gdp_ratio_graph)
+# ggsave("./figures/plot_fdi_outflow.pdf", plot = fdi_net_outflow_graph)
+# ggsave("./figures/plot_fdi_outflow_gdp_ratio.pdf", plot = fdi_outflow_gdp_ratio_graph)
+# ggsave("./figures/plot_aid_gdp_ratio.pdf", plot = aid_gdp_ratio_graph)
+# 
+# # for India
+# ggsave("./figures/plot_gdp_india.pdf", plot = gdp_graph_india)
+# ggsave("./figures/plot_net_dev_assist_aid_india.pdf", plot = net_dev_assit_aid_india_graph)
+# ggsave("./figures/plot_fdi_inflow_india.pdf", plot = fdi_inflow_india_graph)
+# ggsave("./figures/plot_fdi_inflow_gdp_ratio_india.pdf", plot = fdi_inflow_gdp_ratio_india_graph)
+# ggsave("./figures/plot_fdi_outflow_india.pdf", plot = fdi_net_outflow_india_graph)
+# ggsave("./figures/plot_fdi_outflow_gdp_ratio_india.pdf", plot = fdi_outflow_gdp_ratio_india_graph)
+# ggsave("./figures/plot_aid_gdp_ratio_india.pdf", plot = aid_gdp_ratio_india_graph)
+# 
+# net_dev_assit_aid_graph
+
+```
+
+## metadata (aid project related)
+the folder metadata includs those following tsv file
+country_codes.tsv
+data_dictionary.tsv
+deflator_values.tsv
+donor_standardization.tsv
+donor_trans_crosswalk.tsv
+geonames.tsv
+sector_trans_crosswalk.tsv
+status_trans_crosswalk.tsv
+```{r pressure, echo = F}
+wb_sector_trans_crosswalk <- read_tsv("./Data/data-raw/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2/metadata/sector_trans_crosswalk.tsv")
+
+```
+## Disbursement to Commitment ratio
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10, color = "black"),
+    legend.text = element_text(size = 8, color = "black"),
+    plot.title = element_text(size = 16, face = "bold", color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 8, color = "black", hjust = 0),
+    plot.background = element_rect(fill = "lightblue")
+  )
+```{r}
+manipulated_projects_wb_country <- projects_wb_country %>%
+  filter(!is.na(total_disbursements)) %>%
+  mutate(disbur_commit_ratio = total_disbursements / total_commitments)
+
+# now write a ggplot code to display the # now write total_commitmentsa ggplot code to display the histogram of disbur_commit_ratio
+# Create a histogram of disbur_commit_ratio
+disbur_commit_ratio_graph <- ggplot(manipulated_projects_wb_country, aes(x = disbur_commit_ratio)) +
+  geom_histogram(binwidth = 0.1, fill = "steelblue", color = "black", alpha = 0.7) +  # Customize binwidth, fill, and border
+  labs(
+    x = "Disbursement-to-Commitment Ratio",
+    y = "Frequency"
+  ) +
+  theme_minimal() 
+  # theme(
+  #   plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+  #   axis.title = element_text(size = 12),
+  #   axis.text = element_text(size = 10),
+  #   plot.caption = element_text(size = 8, hjust = 0)
+  # )
+    # title = "Disbursement-to-Commitment Ratio for World Bank Projects",
+    # caption = "Note: Ratio calculated as total_disbursements / total_commitments"
+
+disbur_commit_ratio_graph
+# ggsave("./figures/disbur_commit_ratio.pdf", plot = disbur_commit_ratio_graph,
+#        dpi = "retina")
+ 
+```
+
+## Aid to GDP ratio
+```{r}
+# aid to gdp ratio data
+aid_gdp_ratio_wb <- read.csv("./Data/data-raw/gdp/aid_gdp_ratio_wb/aid_gdp_ratio_wb.csv")
+# convert all value with ".." to NA
+aid_gdp_ratio_wb <- aid_gdp_ratio_wb %>%
+  mutate(net_dev_assist_aid = ifelse(net_dev_assist_aid == "..", NA, net_dev_assist_aid),
+         gdp = ifelse(gdp == "..", NA, gdp),
+         fdi_net_inflow = ifelse(fdi_net_inflow == "..", NA, fdi_net_inflow),
+         fdi_net_outflow = ifelse(fdi_net_outflow == "..", NA, fdi_net_outflow),
+         fdi_net_inflow_per_gdp = ifelse(fdi_net_inflow_per_gdp == "..", NA, fdi_net_inflow_per_gdp),
+         fdi_net_outflow_per_gdp = ifelse(fdi_net_outflow_per_gdp == "..", NA, fdi_net_outflow_per_gdp)
+  )         
+# covert all variables to numeric
+aid_gdp_ratio_wb <- aid_gdp_ratio_wb %>%
+  mutate(year = as.numeric(year),
+         net_dev_assist_aid = as.numeric(net_dev_assist_aid),
+         gdp = as.numeric(gdp),
+         fdi_net_inflow = as.numeric(fdi_net_inflow),
+         fdi_net_outflow = as.numeric(fdi_net_outflow),
+         fdi_net_inflow_per_gdp = as.numeric(fdi_net_inflow_per_gdp),
+         fdi_net_outflow_per_gdp = as.numeric(fdi_net_outflow_per_gdp)
+  )
+
+aid_gdp_ratio_wb$aid_gdp_ratio <- with(aid_gdp_ratio_wb, 
+                                        ifelse(is.na(net_dev_assist_aid) | is.na(gdp), 
+                                               NA, 
+                                               net_dev_assist_aid / gdp))
+
+# visualize the evolution of India, you have to subset the data first
+aid_gdp_ratio_wb_india <- subset(aid_gdp_ratio_wb, country_code == "IND")
+
+# filter the NA in the aid_gdp_ratio, gdp and net_dev_assist_aid
+aid_gdp_ratio_wb_india <- subset(aid_gdp_ratio_wb_india, !is.na(aid_gdp_ratio) & !is.na(gdp) & !is.na(net_dev_assist_aid))
+
+# Visualize the evolution of GDP, net development assistance, and the aid to GDP ratio for India
+
+# visualize the graps for India, Bangladesh, Cambodia, China, Laos, Myanmar, Pakistan, Sri Lanka, Thailand, Vietnam, and South Korea
+# c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")
+
+
+# GDP over time
+gdp_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "GDP Over Time for Developping Asia", 
+       x = "Year", 
+       y = "GDP", 
+       color = "Country") +
+  theme_minimal()
+
+# Net official development assistance and official aid received (current US$)
+net_dev_assit_aid_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = net_dev_assist_aid, color = country_name)) +
+  geom_line() +
+  labs(title = "Net ODA and official aid received for Developping Asia", 
+       x = "Year", 
+       y = "Net ODA & aid received in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net inflow 
+fdi_inflow_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = fdi_net_inflow, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Inflow overtime in current USD", 
+       x = "Year", 
+       y = "FDI Net Inflow in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net inflow to GDP ratio
+fdi_inflow_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = fdi_net_inflow_per_gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Inflow to GDP ratio", 
+       x = "Year", 
+       y = "FDI Net Inflow to GDP Ratio", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net outflow
+fdi_net_outflow_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = fdi_net_outflow, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Outflow overtime in current USD", 
+       x = "Year", 
+       y = "FDI Net Outflow in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net outflow to GDP ratio
+fdi_outflow_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = fdi_net_outflow_per_gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Outflow to GDP ratio", 
+       x = "Year", 
+       y = "FDI Net Outflow to GDP Ratio", 
+       color = "Country") +
+  theme_minimal()
+
+  # aid to gdp ratio
+aid_gdp_ratio_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")), 
+       aes(x = as.numeric(year), y = aid_gdp_ratio, color = country_name)) +
+  geom_line() +
+  labs(title = "Net ODA & aid to GDP Ratio", 
+       x = "Year", 
+       y = "Net ODA & aid to GDP ratio", 
+       color = "Country") +
+  theme_minimal()
+
+  ## india only------------------------------------------------------------------
+gdp_graph_india <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "GDP Over Time for India", 
+       x = "Year", 
+       y = "GDP", 
+       color = "Country") +
+  theme_minimal()
+
+# Net official development assistance and official aid received (current US$)
+net_dev_assit_aid_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = net_dev_assist_aid, color = country_name)) +
+  geom_line() +
+  labs(title = "Net ODA and official aid received for India", 
+       x = "Year", 
+       y = "Net ODA & aid received in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net inflow
+fdi_inflow_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = fdi_net_inflow, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Inflow overtime in current USD for India", 
+       x = "Year", 
+       y = "FDI Net Inflow in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net inflow to GDP ratio of India
+fdi_inflow_gdp_ratio_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = fdi_net_inflow_per_gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Inflow to GDP ratio for India", 
+       x = "Year", 
+       y = "FDI Net Inflow to GDP Ratio", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net outflow
+fdi_net_outflow_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = fdi_net_outflow, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Outflow overtime in current USD for India", 
+       x = "Year", 
+       y = "FDI Net Outflow in current USD", 
+       color = "Country") +
+  theme_minimal()
+
+# FDI net outflow to GDP ratio
+fdi_outflow_gdp_ratio_india_graph <- ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+       aes(x = as.numeric(year), y = fdi_net_outflow_per_gdp, color = country_name)) +
+  geom_line() +
+  labs(title = "Foreign Direct Investment Net Outflow to GDP ratio for India", 
+       x = "Year", 
+       y = "FDI Net Outflow to GDP Ratio", 
+       color = "Country") +
+  theme_minimal()
+
+  # aid to gdp ratio
+aid_gdp_ratio_india_graph <-  ggplot(aid_gdp_ratio_wb %>% filter(country_code %in% c("IND")), 
+         aes(x = as.numeric(year), y = aid_gdp_ratio, color = country_name)) +
+    geom_line() +
+    labs(title = "Aid to GDP Ratio Over Time for India", 
+         x = "Year", 
+         y = "Net ODA & aid to GDP ratio", 
+         color = "Country") +
+    theme_minimal()
+
+fdi_inflow_gdp_ratio_india_graph
+```
+## Test
+```{r}
+########
+# # Initialize a list to hold project IDs without docty values
+# projects_without_docty <- list()
+# 
+# # Loop through each project in all_documents
+# for (project_id in names(all_documents)) {
+#   project_docs <- all_documents[[project_id]]$documents
+#   
+#   # Check if project_docs is not NULL and contains documents
+#   if (!is.null(project_docs) && length(project_docs) > 0) {
+#     # Initialize a vector to hold document IDs without docty
+#     missing_docty_docs <- character(0)
+#     
+#     # Loop through each document in project_docs
+#     for (doc_id in names(project_docs)) {
+#       # Only consider document IDs that start with "D"
+#       if (grepl("^D", doc_id)) {
+#         # Check if 'docty' is NULL
+#         if (is.null(project_docs[[doc_id]]$docty)) {
+#           # Add the document ID to the vector
+#           missing_docty_docs <- c(missing_docty_docs, doc_id)
+#         }
+#       }
+#     }
+#     
+#     # If there are any documents without docty, store the project ID and the document IDs
+#     if (length(missing_docty_docs) > 0) {
+#       projects_without_docty[[project_id]] <- missing_docty_docs
+#     }
+#   }
+# }
+# 
+# # Display the projects without docty values
+# projects_without_docty
+# 
+# filtered_docs_test <- all_documents$P124041$documents
+# 
+# # count how many document in the filtered_all_documents
+# count_doc <- 0
+# for (project_id in names(filtered_all_documents)) {
+#   count_doc <- count_doc + length(filtered_all_documents[[project_id]]$documents)
+# }
+# count_doc
+# 
+# # 220 is the correct 
+# 
+# # how many unique project_id in flattened_document_df
+# length(unique(flattened_document_df$project_id))
+# 
+# # what are the difference of project_id in flattened_document_df and flattened_document_df_filtered
+# setdiff(unique(flattened_document_df$project_id), unique(flattened_document_df_filtered$project_id))
+# 
+# # how many NA in the total_disbursements of projects_wb_india_test
+# sum(is.na(projects_wb_india_manipulated$total_disbursements))
+# 
+# sum(is.na(projects_wb_india$total_disbursements))
+# 
+# # check the type of project of the project_id with na value in total_disbursements of projects_wb_india
+# na_disbur_project_type <- projects_wb_india_manipulated%>%
+#   dplyr::filter(is.na(total_disbursements)) %>%
+#   dplyr::select(project_id, ad_sector_codes, total_commitments, total_disbursements)
+```
+
+# Conflict and other datas
+Here we take a look at different conflict data, at the moment I reason myself that corruption is difficult to quantify. We often go into gray area of the economy. People often are not willing to talk about it. The process and reality of corruption is complex to demystify, what is the incentive of people in different sides participating to the corruption. In total, society as a whole losts because of corruption (in term of social welfare)/. From what I research myself from the literature review of the paper of Banerjee, well it's from the point of view of principal agent model. Difficult to extract data of corruption. Even though there are several indexes for corruption, but they are more suitable for cross-country estimation than a study of a country of it own. So we can use the conflict data as a proxy for the potential presence of corruption. The data on the conflict is factual, reported based on what happens
+
+## UCDP: Uppsala Conflict Data Program
+• Davies, Shawn, Garoun Engström, Therese Pettersson & Magnus Öberg (2024). Organized violence 1989-2023, and the prevalence of organized crime groups. Journal of Peace Research 61(4)
+• Sundberg, Ralph and Erik Melander (2013) Introducing the UCDP Georeferenced Event Dataset. Journal of Peace Research 50(4).
+
+Sundberg, Ralph, and Erik Melander, 2013, “Introducing the UCDP Georeferenced Event Dataset”, Journal of Peace Research, vol.50, no.4, 523-532
+When appropriate, also cite this codebook: Högbladh Stina, 2024, “UCDP GED Codebook version 24.1”, Department of Peace and Conflict Research, Uppsala University
+version 24.1
+
+When filtered to India, there are 17759 incidents. Just need to make sure that this data comsists of protest 
+Type of UCDP conflict: 1: state-based conflict, 2: non-state conflict, 3: one-sided violence
+The geo identifier of the even is geom_wkt
+after scanning for 
+```{r}
+geo_event_ucdp <- readRDS("./Data/data-raw/UCDP/UCDP Georeferenced Event Dataset (GED) Global version 24.1/ged241.rds")
+
+geo_event_ucdp_country <- filter(geo_event_ucdp, country == country_name) 
+geo_event_ucdp_country <- geo_event_ucdp_country[order(geo_event_ucdp_country$year),]
+modelsummary::datasummary_skim(geo_event_ucdp_country)
+
+# Convert the WKT geometries to sf objects
+geo_event_ucdp_country_sf <- geo_event_ucdp_country %>%
+  st_as_sf(wkt = "geom_wkt", crs = 4326)
+
+# changing the identifier name
+names(geo_event_ucdp_country_sf)[names(geo_event_ucdp_country_sf) == 'id'] <- 'conflict_id'
+
+
+```
+
+
+
+# Water stress: some datas of my previous work
+plus the continent mapping: https://gist.github.com/stevewithington/20a69c0b6d2ff846ea5d35e5fc47f26c#file-country-and-continent-codes-list-csv-csv
+
+```{r pressure, echo = F}
+gdb <- file.path("./Data/data-raw/water_risk_aqueduct_4.0/GDB/Aq40_Y2023D07M05.gdb")
+layers <- st_layers(gdb)
+print(layers$name)
+aqueduct4_annual <- st_read(gdb, layer = layers$name[1]) #this gives baseline_annual
+
+
+## adding the continent to the data
+aqueduct4_annual <- aqueduct4_annual %>%
+  left_join(subset(mapping_continent, select = c("gid_0", "continent_code", "continent_name")), by = "gid_0")
+
+# Extract the data for India
+ws_annual_country <- subset(aqueduct4_annual, gid_0 == country_code_3_letter)
+
+
+```
+## Check the data
+```{r}
+# # Group by country, including continents, and calculate the median of bws_cat
+# country_water_stress <- aqueduct4_annual %>%
+#   st_drop_geometry() %>%
+#   group_by(gid_0, name_0, continent_code, continent_name) %>%
+#   summarise(med_bws_raw = median(bws_raw, na.rm = TRUE),
+#             med_bws_cat = median(bws_cat, na.rm = T), .groups = 'drop') %>%
+#   arrange(desc(med_bws_raw)) %>%
+#   #select only country in Asia 
+#   filter(continent_code == "AS")
+# 
+# # Display the table
+# View(country_water_stress)
+
+```
+
+# Visualization
+## Water stress
+```{r}
+library(ggplot2)
+library(sf)
+
+# Define custom colors for each category with darker colors for higher stress
+water_stress_colors <- c(
+  "-9999" = "grey50",  # No Data
+  "-1" = "grey80",     # Assuming -1 might represent another special category
+  "0" = "#FFFFCC",     # Low (<10%) - Lightest
+  "1" = "#FED976",     # Low - Medium (10-20%) - Slightly darker
+  "2" = "#FEB24C",     # Medium - High (20-40%) - Darker
+  "3" = "#FD8D3C",     # High (40-80%) - Even darker
+  "4" = "#BD0026"      # Extremely High (>80%) - Darkest, red
+)
+# Define labels for the legend
+water_stress_labels <- c(
+  "-9999" = "No Data",
+  "-1" = "Arid and Low Water Use",  # Adjust if -1 has a specific meaning
+  "0" = "Low (<10%)",
+  "1" = "Low - Medium (10-20%)",
+  "2" = "Medium - High (20-40%)",
+  "3" = "High (40-80%)",
+  "4" = "Extremely High (>80%)"
+)
+
+
+ws_conflict_graph <- ggplot() +
+  # First layer: World map with country borders
+  geom_sf(data = country_gid_2_sf, fill = NA, color = "white", size = 0.2) +
+  # Second layer: Water stress map
+  geom_sf(data = ws_annual_country, aes(fill = as.character(bws_cat)), color = NA) +
+  # Custom color scale for water stress
+  scale_fill_manual(
+    name = "Overall Water Risk",
+    values = water_stress_colors,
+    labels = water_stress_labels,
+    breaks = names(water_stress_colors)
+  ) +
+  # Custom color scale for conflict onset points
+  scale_color_manual(
+    values = c("Aid location" = "black"),
+    name = "Aid"
+  ) +
+  # Theme and labels
+  theme_void() +
+  labs(
+    title = "India's water stress",
+    subtitle = "Based on Aqueduct 4.0 Baseline Water Stress Categories",
+    caption = "Source: Aqueduct 4.0 by WRI and Source: AidData | World Bank Geocoded Research Release, Version 1.4.2"
+  ) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10, color = "black"),
+    legend.text = element_text(size = 8, color = "black"),
+    plot.title = element_text(size = 16, face = "bold", color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 8, color = "black", hjust = 0),
+    plot.background = element_rect(fill = "grey90")
+  )
+
+
+ws_conflict_graph
+# ggsave("./figures/ws_wb_graph.pdf", plot = ws_conflict_graph)
+```
+
+
+## Aid project
+```{r}
+ggplot() +
+  geom_sf(data = country_gid_2_sf) + 
+  geom_sf(data = locations_wb_country_sf, color = "red", size = 2) +  # Use geom_sf for sf objects
+  theme_minimal() + 
+  ggtitle("Visualization of WB aid projects")
+
+
+# let's do one more map with the project location but now we distinguish whether the project are water related or not. Water-related projects have the ad_sector_codes of 311, 312, 310, 140
+# Create a new column indicating whether the project is water-related
+locations_wb_country_sf$water_related <- ifelse(locations_wb_country_sf$ad_sector_codes %in% c("311", "312", "310", "140", "151"), "Water-related", "Non-water-related")
+# Create the map
+wb_project_graph <- ggplot() +
+  geom_sf(data = country_gid_2_sf) + 
+  geom_sf(data = locations_wb_country_sf, 
+          aes(color = water_related, size = water_related), 
+          alpha = 0.6) +  # Use aes to color and size points by water-related status
+  scale_color_manual(name = "Project Type",
+                     values = c("Water-related" = "blue", "Non-water-related" = "red")) +  # Custom colors for clarity
+  scale_size_manual(name = "Project Type",values = c("Water-related" = 2, "Non-water-related" = 0.5)) +  # Different sizes for distinction
+  theme_minimal() + 
+  #   labs(
+  #   title = "Distribution of World Bank Aid Projects from 1995 to 2014",
+  #   subtitle = "with subdistricts (administrative level 2) as baseline map layer",
+  #   caption = "Source: AidData | World Bank Geocoded Research Release, Version 1.4.2"
+  # ) + 
+  theme(plot.margin = margin(0, 0, 0, 0))
+  # ggtitle(cat("Visualization of World Bank Aid Projects in", country_name)) +
+  # labs(color = "Project Type", size = "Project Type") +
+  # theme(legend.position = "bottom")
+wb_project_graph
+# ggsave("./figures/wb_project_graph_afg.pdf", plot = wb_project_graph,
+#        width = 10, 
+#        height = 6, 
+#        units = "in", 
+#        dpi = "retina")
+
+```
+## Conflict
+The data is geo_event_ucdp_country_sf, baselayer is country_gid_2_sf
+```{r}
+
+# Define custom colors for each category with darker colors for higher stress
+water_stress_colors <- c(
+  "-9999" = "grey50",  # No Data
+  "-1" = "grey80",     # Assuming -1 might represent another special category
+  "0" = "#FFFFCC",     # Low (<10%) - Lightest
+  "1" = "#FED976",     # Low - Medium (10-20%) - Slightly darker
+  "2" = "#FEB24C",     # Medium - High (20-40%) - Darker
+  "3" = "#FD8D3C",     # High (40-80%) - Even darker
+  "4" = "#BD0026"      # Extremely High (>80%) - Darkest, red
+)
+# Define labels for the legend
+water_stress_labels <- c(
+  "-9999" = "No Data",
+  "-1" = "Arid and Low Water Use",  # Adjust if -1 has a specific meaning
+  "0" = "Low (<10%)",
+  "1" = "Low - Medium (10-20%)",
+  "2" = "Medium - High (20-40%)",
+  "3" = "High (40-80%)",
+  "4" = "Extremely High (>80%)"
+)
+
+geo_event_ucdp_country_sf_1995_2014 <- geo_event_ucdp_country_sf %>%
+  filter(year >= 1995 & year <= 2014)
+# Plotting
+
+
+  # theme_void() +  # Use theme_void for a cleaner, black background look
+  # labs(
+  #   title = "India's water stress with conflict location from 1995 to 2014",
+  #   subtitle = "with HydroBASINS level 6 as baseline map layer",
+  #   caption = "Source: Aqueduct 4.0 by WRI and UCDP conflict dataset"
+  # ) +
+
+
+
+
+ws_conflict_graph <- ggplot() +
+  geom_sf(data = ws_annual_country, aes(fill = as.character(bws_cat)), color = "black", size = 0.3) +
+  geom_sf(data = geo_event_ucdp_country_sf_1995_2014, aes(color = "Conflict Onset"), size = 0.5) +
+  scale_fill_manual(
+    name = "Overall Water Risk",
+    values = water_stress_colors,
+    labels = water_stress_labels,
+    breaks = names(water_stress_colors)
+  ) + 
+  scale_color_manual(
+    values = c("Conflict Onset" = "black"),
+    name = "Conflict"
+  ) +
+  theme_minimal() +
+  theme(plot.margin = margin(0, 0, 0, 0))  # Remove default margins
+
+ws_conflict_graph
+
+# Optional: Add this if using coord_sf
+# ws_conflict_graph <- ws_conflict_graph + coord_sf(expand = FALSE)
+
+# Save with specific dimensions
+# ggsave("./figures/ws_conflict_graph_afg.pdf", 
+#        plot = ws_conflict_graph, 
+#        width = 10, 
+#        height = 6, 
+#        units = "in", 
+#        dpi = "retina")
+
+```
+
+## Sector distribution
+### For the whole country
+```{r}
+# Check types
+str(projects_wb_country$ad_sector_codes)
+str(wb_sector_trans_crosswalk$ad_sector_codes)
+
+# Convert to character if necessary
+wb_sector_trans_crosswalk$ad_sector_codes <- as.character(wb_sector_trans_crosswalk$ad_sector_codes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+
+# Step 1: Split the sector codes and count occurrences
+sector_distribution <- projects_wb_country %>%
+  # Split the sector codes
+  mutate(ad_sector_codes = str_split(ad_sector_codes, "\\|")) %>%
+  # Unnest to get each sector code in a separate row
+  unnest(ad_sector_codes) %>%
+  # Count the occurrences of each sector
+  count(ad_sector_codes, name = "project_count") %>%
+  # Join with the sector names
+  left_join(wb_sector_trans_crosswalk, by = "ad_sector_codes")
+
+# Step 2: Visualize with ggplot2
+wb_proj_sector_count <- ggplot(sector_distribution, aes(x = reorder(ad_sector_names, project_count), y = project_count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() + # Flip coordinates for better readability with many categories
+  labs(
+       x = "Sector",
+       y = "Project location counts") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12)) # Adjust text size if needed
+
+# title = "Distribution of World Bank Projects by Sector",
+# caption = "Note: Overlapping could happen because one project could be classified in several sectors"
+wb_proj_sector_count
+
+# ggsave("./figures/wb_proj_sector_count_lka.pdf", plot = wb_proj_sector_count,
+#        width = 10, 
+#        height = 8, 
+#        units = "in", 
+#        dpi = "retina")
+```
+### By water stress cat
+```{r}
+ws_wb_projects <- st_join(sf::st_make_valid(locations_wb_country_sf), sf::st_make_valid(ws_annual_country), join = st_intersects)
+
+# Check types
+str(locations_wb_country_sf$ad_sector_codes)
+str(wb_sector_trans_crosswalk$ad_sector_codes)
+
+# Convert to character if necessary
+wb_sector_trans_crosswalk$ad_sector_codes <- as.character(wb_sector_trans_crosswalk$ad_sector_codes)
+
+# Step 1: Split the sector codes and count occurrences by water stress category
+sector_distribution_by_ws <- ws_wb_projects %>%
+  # Filter out rows where bws_cat is NA or 0 (since you want categories 1, 2, 3, 4)
+  filter(bws_cat %in% 1:4) %>%
+  # Split the sector codes
+  mutate(ad_sector_codes = str_split(ad_sector_codes, "\\|")) %>%
+  # Unnest to get each sector code in a separate row
+  unnest(ad_sector_codes) %>%
+  # Count the occurrences of each sector by water stress category
+  count(ad_sector_codes, bws_cat, name = "location_count") %>%
+  # Join with the sector names
+  left_join(wb_sector_trans_crosswalk, by = "ad_sector_codes")
+
+# Step 2: Define water stress labels for readability
+water_stress_labels <- c(
+  "1" = "Level 1 (Low - Medium)",
+  "2" = "Level 2 (Medium - High)",
+  "3" = "Level 3 (High)",
+  "4" = "Level 4 (Extreme)"
+)
+
+# Step 3: Calculate total project locations for each water stress category
+total_locations_by_ws <- ws_wb_projects %>%
+  filter(bws_cat %in% 1:4) %>%
+  group_by(bws_cat) %>%
+  summarise(total_locations = n()) %>%
+  mutate(water_stress_label = case_when(
+    bws_cat == 1 ~ "Low - Medium (10–20%)",
+    bws_cat == 2 ~ "Medium - High (20–40%)",
+    bws_cat == 3 ~ "High (40–80%)",
+    bws_cat == 4 ~ "Extreme (>80%)"
+  ))
+
+# Assuming all necessary data (ws_wb_projects, wb_sector_trans_crosswalk, etc.) is already loaded and processed as in your original code
+
+# Initialize an empty list to store the plots
+plot_list <- list()
+
+# Create and store plots for each water stress level (1 to 4)
+for (ws_level in 1:4) {
+  # Filter data for the specific water stress category
+  ws_data <- sector_distribution_by_ws %>%
+    filter(bws_cat == ws_level)
+  
+  # Get total locations for this water stress category
+  total_locations <- total_locations_by_ws$total_locations[total_locations_by_ws$bws_cat == ws_level]
+  
+  # Create plot for this water stress category
+  plot <- ggplot(ws_data, aes(x = reorder(ad_sector_names, location_count), y = location_count)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() + # Flip coordinates for better readability with many categories
+    labs(
+      title = paste("Water stress:", water_stress_labels[as.character(ws_level)]),
+      x = "Sector",
+      y = "Number of Locations Associated with Sector"
+      # caption = "Note: Overlapping occurs because one location can be classified in multiple sectors"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 8),
+      plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+      legend.position = "bottom"
+    ) +
+    ggplot2::annotate("text", x = Inf, y = Inf, label = paste("Total Locations:", total_locations),
+                      hjust = 1.1, vjust = 1.5, size = 3, color = "black")
+  
+  # Store the plot in the list
+  plot_list[[ws_level]] <- plot
+}
+
+
+# # Export all four plots to a single PDF in a 2x2 grid with landscape orientation
+# pdf("./figures/sector_distribution_by_ws_lka.pdf", width = 11, height = 8.5) # Landscape: width > height
+# grid.arrange(plot_list[[1]], plot_list[[2]], plot_list[[3]], plot_list[[4]], nrow = 2, ncol = 2)
+# dev.off()
+```
+
+#### Project title analysis
+type of project in each water stress level 
+##### level 1 and level 4
+```{r}
+
+ws_wb_projects_w_title <- ws_wb_projects %>%
+  left_join(subset(projects_wb_country, select = c("project_id", "project_title")), by = "project_id") 
+
+# ws_wb for only water stress level 1 
+ws_wb_projects_1 <- subset(ws_wb_projects_w_title, bws_cat == 1)
+
+# ws_wb for only water stress levle 4
+ws_wb_projects_4 <- subset(ws_wb_projects_w_title, bws_cat == 4)
+
+# level 2 and level 3
+ws_wb_projects_2 <- subset(ws_wb_projects_w_title, bws_cat == 2)
+ws_wb_projects_3 <- subset(ws_wb_projects_w_title, bws_cat == 3)
+
+# extract the unique project_title
+unique(ws_wb_projects_1$project_title)
+unique(ws_wb_projects_2$project_title)
+unique(ws_wb_projects_3$project_title)
+unique(ws_wb_projects_4$project_title)
+
+
+# Extract unique project titles for levels 1 and 4
+titles_level1 <- unique(ws_wb_projects_1$project_title)
+titles_level2 <- unique(ws_wb_projects_2$project_title)
+titles_level3 <- unique(ws_wb_projects_3$project_title)
+titles_level4 <- unique(ws_wb_projects_4$project_title)
+
+# Function to clean text data
+clean_text <- function(titles) {
+  # Create a corpus from the titles
+  corpus <- Corpus(VectorSource(titles))
+  # Convert to lowercase
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  # Remove punctuation
+  corpus <- tm_map(corpus, removePunctuation)
+  # Remove numbers
+  corpus <- tm_map(corpus, removeNumbers)
+  # Remove common English stop words (e.g., "the", "and")
+  corpus <- tm_map(corpus, removeWords, stopwords("en"))
+  # Stem words to their root form (e.g., "irrigation" -> "irrig")
+  corpus <- tm_map(corpus, stemDocument)
+  return(corpus)
+}
+
+# Clean the project titles
+corpus_level1 <- clean_text(titles_level1)
+corpus_level4 <- clean_text(titles_level4)
+
+# Define categories and keywords for Level 1 (low-to-medium stress)
+# Based on assumptions: small-scale interventions, water management, community focus
+level1_categories <- list(
+  small_scale = c("community", "decentralized", "rural", "local"),
+  water_management = c("irrigation", "watershed", "tank", "water"),
+  community_cohesion = c("empowerment", "livelihoods", "social")
+)
+
+# Define categories and keywords for Level 4 (extreme stress)
+# Based on assumptions: survival needs, emergency response, broader support
+level4_categories <- list(
+  survival_needs = c("water supply", "sanitation", "desalination", "rainwater"),
+  emergency_response = c("emergency", "rehabilitation", "relief", "recovery", "solidarity", "mitigation", "disaster", "earthquake", "flood", "crisis", "response", "restoration", "humanitarian"),
+  international_support = c("international", "support", "aid"),
+  water_management = c("irrigation", "watershed", "tank", "water")
+)
+
+# Function to check if a title contains any keyword from a category
+# Uses word boundaries to match whole words/phrases accurately
+contains_category <- function(title, keywords) {
+  any(sapply(keywords, function(k) grepl(paste0("\\b", k, "\\b"), title, ignore.case = TRUE)))
+}
+
+# Count projects in each category for Level 1 (using original titles, not stemmed)
+category_counts_level1 <- sapply(level1_categories, function(cat) {
+  sum(sapply(titles_level1, function(t) contains_category(t, cat)))
+})
+
+# Count projects in each category for Level 4
+category_counts_level4 <- sapply(level4_categories, function(cat) {
+  sum(sapply(titles_level4, function(t) contains_category(t, cat)))
+})
+
+# Calculate percentages
+total_projects_level1 <- length(titles_level1)
+category_percent_level1 <- (category_counts_level1 / total_projects_level1) * 100
+
+total_projects_level4 <- length(titles_level4)
+category_percent_level4 <- (category_counts_level4 / total_projects_level4) * 100
+
+# Create data frames for plotting
+df_level1 <- data.frame(
+  category = names(level1_categories),
+  percentage = category_percent_level1,
+  level = "Level 1"
+)
+
+df_level4 <- data.frame(
+  category = names(level4_categories),
+  percentage = category_percent_level4,
+  level = "Level 4"
+)
+
+# Visualization for Level 1
+ggplot(df_level1, aes(x = category, y = percentage)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Project Categories for Water Stress Level 1",
+       x = "Category", y = "Percentage of Projects") +
+  ylim(0, max(c(category_percent_level1, category_percent_level4)) * 1.1)
+
+# Visualization for Level 4
+ggplot(df_level4, aes(x = category, y = percentage)) +
+  geom_bar(stat = "identity", fill = "red") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Project Categories for Water Stress Level 4",
+       x = "Category", y = "Percentage of Projects") +
+  ylim(0, max(c(category_percent_level1, category_percent_level4)) * 1.1)
+
+# Cross-level check: How many projects in one level contain keywords from the other
+level1_with_level4_keywords <- sum(sapply(titles_level1, function(t) {
+  contains_category(t, unlist(level4_categories))
+}))
+level4_with_level1_keywords <- sum(sapply(titles_level4, function(t) {
+  contains_category(t, unlist(level1_categories))
+}))
+
+# Print cross-level results
+cat("Level 1 projects with Level 4 keywords:", level1_with_level4_keywords, "\n")
+cat("Level 4 projects with Level 1 keywords:", level4_with_level1_keywords, "\n")
+
+# Optional: Display top categories
+cat("\nLevel 1 Category Percentages:\n")
+print(category_percent_level1)
+cat("\nLevel 4 Category Percentages:\n")
+print(category_percent_level4)
+```
+
+#####level 2 and level 3 
+```{r}
+titles_level2 <- unique(ws_wb_projects_2$project_title)
+titles_level3 <- unique(ws_wb_projects_3$project_title)
+
+
+# Remove any NA values from the titles
+titles_level2 <- titles_level2[!is.na(titles_level2)]
+titles_level3 <- titles_level3[!is.na(titles_level3)]
+
+# Define categories and keywords relevant to potential competition or complexity
+categories <- list(
+  water_management = c("water", "irrigation", "dam", "tank", "watershed", "supply", "sanitation"),
+  infrastructure = c("road", "highway", "power", "urban", "municipal", "transport"),
+  conservation = c("conservation", "biodiversity", "forest", "environmental", "ecological"),
+  poverty_agriculture = c("poverty", "agriculture", "rural", "livelihood", "development"),
+  governance = c("reform", "capacity", "institutional", "governance", "policy")
+)
+
+# Function to clean titles (convert to lowercase, remove punctuation)
+clean_title <- function(title) {
+  tolower(gsub("[[:punct:]]", "", title))
+}
+
+# Clean the project titles
+titles_level2_clean <- sapply(titles_level2, clean_title)
+titles_level3_clean <- sapply(titles_level3, clean_title)
+
+# Function to check if a title contains any keyword from a category (using word boundaries)
+contains_category <- function(title, keywords) {
+  any(sapply(keywords, function(k) str_detect(title, paste0("\\b", k, "\\b"))))
+}
+
+# Count projects in each category for level 2
+category_counts_level2 <- sapply(categories, function(cat) {
+  sum(sapply(titles_level2_clean, function(t) contains_category(t, cat)))
+})
+
+# Count projects in each category for level 3
+category_counts_level3 <- sapply(categories, function(cat) {
+  sum(sapply(titles_level3_clean, function(t) contains_category(t, cat)))
+})
+
+# Calculate percentages
+total_projects_level2 <- length(titles_level2)
+category_percent_level2 <- (category_counts_level2 / total_projects_level2) * 100
+
+total_projects_level3 <- length(titles_level3)
+category_percent_level3 <- (category_counts_level3 / total_projects_level3) * 100
+
+# Create data frames for plotting
+df_level2 <- data.frame(
+  category = names(categories),
+  count = category_counts_level2,
+  percentage = category_percent_level2,
+  level = "Level 2"
+)
+
+df_level3 <- data.frame(
+  category = names(categories),
+  count = category_counts_level3,
+  percentage = category_percent_level3,
+  level = "Level 3"
+)
+
+# Combine data for comparison
+df_combined <- rbind(df_level2, df_level3)
+
+# Visualize the number of projects in each category
+ggplot(df_combined, aes(x = category, y = count, fill = level)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Project Categories for Water Stress Levels 2 and 3",
+       x = "Category", y = "Number of Projects")
+
+# Visualize the percentage of projects in each category
+ggplot(df_combined, aes(x = category, y = percentage, fill = level)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Project Categories for Water Stress Levels 2 and 3",
+       x = "Category", y = "Percentage of Projects")
+
+# Optional: Check how many projects are assigned to multiple categories
+assign_categories <- function(titles, categories) {
+  lapply(titles, function(t) {
+    names(categories)[sapply(categories, function(cat) contains_category(t, cat))]
+  })
+}
+
+# Get categories for each project in level 2 and 3
+categories_per_project_level2 <- assign_categories(titles_level2_clean, categories)
+categories_per_project_level3 <- assign_categories(titles_level3_clean, categories)
+
+# Count the number of categories per project
+num_categories_per_project_level2 <- sapply(categories_per_project_level2, length)
+num_categories_per_project_level3 <- sapply(categories_per_project_level3, length)
+
+# Summary of how many projects fall into 0, 1, 2, etc., categories
+cat("Level 2 - Number of categories per project:\n")
+print(table(num_categories_per_project_level2))
+cat("\nLevel 3 - Number of categories per project:\n")
+print(table(num_categories_per_project_level3))
+
+# Optional: Print the category counts and percentages
+cat("\nLevel 2 Category Counts:\n")
+print(category_counts_level2)
+cat("\nLevel 2 Category Percentages:\n")
+print(category_percent_level2)
+cat("\nLevel 3 Category Counts:\n")
+print(category_counts_level3)
+cat("\nLevel 3 Category Percentages:\n")
+print(category_percent_level3)
+```
+##### in general 
+```{r}
+ws_wb_projects_w_title <- ws_wb_projects %>%
+  left_join(subset(projects_wb_country, select = c("project_id", "project_title")), by = "project_id") 
+
+# ws_wb for only water stress level 1 
+ws_wb_projects_1 <- subset(ws_wb_projects_w_title, bws_cat == 1)
+
+# ws_wb for only water stress levle 4
+ws_wb_projects_4 <- subset(ws_wb_projects_w_title, bws_cat == 4)
+
+# level 2 and level 3
+ws_wb_projects_2 <- subset(ws_wb_projects_w_title, bws_cat == 2)
+ws_wb_projects_3 <- subset(ws_wb_projects_w_title, bws_cat == 3)
+
+# extract the unique project_title
+unique(ws_wb_projects_1$project_title)
+unique(ws_wb_projects_2$project_title)
+unique(ws_wb_projects_3$project_title)
+unique(ws_wb_projects_4$project_title)
+
+# Extract unique project titles for levels 1 and 4
+titles_level1 <- unique(ws_wb_projects_1$project_title)
+titles_level2 <- unique(ws_wb_projects_2$project_title)
+titles_level3 <- unique(ws_wb_projects_3$project_title)
+titles_level4 <- unique(ws_wb_projects_4$project_title)
+
+# Define categories and associated keywords
+# These can be adjusted based on the specific context of the country
+categories <- list(
+  "small scale" = c("community", "decentralized", "rural", "local"),
+  "community cohesion" = c("empowerment", "livelihoods", "social"),
+  "water management" = c("water", "irrigation", "dam", "tank", "watershed", "supply", "sanitation", "drainage", "flood", "river", "aquifer", "hydro", "sewage", "desalination", "reservoir"),
+  "International support" = c("international", "support", "aid"),
+  "infrastructure" = c("infrastructure", "transport", "road", "highway", "bridge", "reconstruction", "power", 
+                       "energy", "electricity", "grid", "urban", "port", "rail", "transmission", "construction"),
+  "emergency response" = c("emergency", "rehabilitation", "relief", "recovery", "solidarity", "mitigation", "disaster", "earthquake", "flood", "crisis", "response", "restoration", "humanitarian"),
+  "health" = c("health", "medical", "hospital", "clinic", "pandemic", "hiv", "tuberculosis", "nutrition", "disease", "vaccination", "malaria", "maternal", "child", "care", "epidemic"),
+  "education" = c("education", "school", "university", "training", "skills", "learning", "literacy",  "student", "teacher", "academic", "vocational", "scholarship", "curriculum"),
+  "agriculture" = c("agriculture", "horticulture", "livestock", "rural", "irrigation", "farm", "crop", "food", "forestry", "soil", "harvest", "agribusiness", "land", "cultivation"),
+  "governance" = c("governance", "administration", "reform", "capacity", "institution", "policy", "public", "management", "legal", "judicial", "system", "government", "municipal", "decentralization"),
+  "finance" = c("finance", "microfinance", "banking", "investment", "credit", "loan", 
+                "poverty", "fund", "financial"),
+  "security" = c("security", "safety", "conflict", "peace", "stabilization", "protection", "law", "order", "justice", "defense", "violence", "reconciliation")
+)
+
+
+# Function to clean project titles
+clean_title <- function(title) {
+  # Convert to lowercase and remove punctuation
+  tolower(gsub("[[:punct:]]", "", title))
+}
+
+contains_category <- function(title, keywords) {
+  # Convert title and keywords to lowercase for case-insensitive matching
+  title_lower <- tolower(title)
+  keywords_lower <- tolower(keywords)
+  
+  # Use word boundaries to match whole words only
+  any(sapply(keywords_lower, function(k) str_detect(title_lower, paste0("\\b", k, "\\b"))))
+}
+
+
+# Function to analyze project titles for one water stress level
+analyze_level <- function(titles, categories, level_name) {
+  # Remove NA values from titles
+  titles <- titles[!is.na(titles)]
+  
+  # Clean the titles
+  titles_clean <- sapply(titles, clean_title)
+  
+  # Count projects in each category
+  category_counts <- sapply(categories, function(cat) {
+    sum(sapply(titles_clean, function(t) contains_category(t, cat)))
+  })
+  
+  # Calculate total number of projects
+  total_projects <- length(titles)
+  
+  # Calculate percentages
+  category_percent <- (category_counts / total_projects) * 100
+  
+  # Create a data frame with results
+  df <- data.frame(
+    category = names(categories),
+    count = category_counts,
+    percentage = category_percent,
+    level = level_name
+  )
+  
+  return(df)
+}
+
+# Analyze each water stress level using the provided titles
+df_level1 <- analyze_level(titles_level1, categories, "Level 1")
+df_level2 <- analyze_level(titles_level2, categories, "Level 2")
+df_level3 <- analyze_level(titles_level3, categories, "Level 3")
+df_level4 <- analyze_level(titles_level4, categories, "Level 4")
+
+# Combine results from all levels into one data frame
+df_combined <- bind_rows(df_level1, df_level2, df_level3, df_level4)
+
+# Visualize the number of projects in each category across levels
+p1 <- ggplot(df_combined, aes(x = category, y = count, fill = level)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    # title = "Project Categories by Water Stress Level",
+       x = "Category",
+       y = "Project location counts",
+       fill = "Water stress") +
+  scale_fill_brewer(palette = "Set1")
+
+# Optional: Analyze how many categories each project falls into (example for Level 1)
+# Function to assign categories to each project
+assign_categories <- function(titles_clean, categories) {
+  lapply(titles_clean, function(t) {
+    names(categories)[sapply(categories, function(cat) contains_category(t, cat))]
+  })
+}
+
+p1
+
+
+# expor those graphs to pdf
+ggsave("./figures/proj_title_count_lka.pdf", plot = p1,
+       width = 9,
+       height = 6)
+# ggsave("./figures/proj_title_anal_percent_afg.pdf", plot = p2)
+```
+# Saving the environement
+```{r pressure, echo=FALSE}
+# base::save.image(file = "./streamlined_v2.RData")
+
+```
