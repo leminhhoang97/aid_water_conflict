@@ -1,5 +1,5 @@
 ---
-title: "Masterthesis_LMH"
+title: "Data preparation"
 author: "Le Minh Hoang"
 date: "2024-06-18"
 output: pdf_document
@@ -9,7 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Package
+# Loading and install the package
 ```{r pressure, echo = FALSE}
 if (!requireNamespace("pacman", quietly = TRUE)) {
   install.packages("pacman")
