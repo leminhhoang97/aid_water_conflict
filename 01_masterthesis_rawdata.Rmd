@@ -26,78 +26,11 @@ pacman::p_load(
 
 ```
 
-# Unzip the data and loading necessary packages
-
-```{r}
-# rm(list=ls())
-
-# #load the data for whole world 
-# # Read the data without specifying column names
-# wb_project_2024 <- read_xls("./Data/World Bank project/wb_project_all.xls", sheet = 1, col_names = FALSE)
-# 
-# # Set the column names to the values in the third row
-# colnames(wb_project_2024) <- wb_project_2024[3, ]
-# 
-# # Remove the first three rows from the data
-# wb_project_2024 <- wb_project_2024[-c(1, 2, 3), ]
-# 
-# # Convert the data frame to ensure the types are correct
-# wb_project__2024 <- type.convert(wb_project_2024, as.is = TRUE)
-# 
-# ## Only for India 
-# wb_project_india_2024 <- read_xlsx("./Data/World Bank project/wb_project_india.xlsx", sheet = 1, col_names = FALSE)
-# 
-# # Set the column names to the values in the third row
-# colnames(wb_project_india_2024) <- wb_project_india_2024[1, ]
-# 
-# # Remove the first three rows from the data
-# wb_project_india_2024 <- wb_project_india_2024[-c(1), ]
-# 
-# # Convert the data frame to ensure the types are correct
-# wb_project_india_2024 <- type.convert(wb_project_india_2024, as.is = TRUE)
-
-#comment: the data downloaded directly from the World Bank website (https://projects.worldbank.org/en/projects-operations/projects-list) seems to be very lack in the content of the data. Try something else maybe? Mr. Dannemann's suggestion for example. Note on 28th Nov 2024: we don't use this data because it's not complete in terms of covariate, we use the Aiddata instead.
-
-# # load the data in Mr. Dannemann's suggestion
-# dest <- "./Data/World Bank project/aiddata.zip"
-# if (!file.exists(dest)) {
-#   file <- "https://github.com/AidData-WM/public_datasets/blob/master/geocoded/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip?raw=true"
-# 
-#   utils::download.file(url = file,
-#                        destfile = dest)
-# 
-#   utils::unzip(zipfile = dest, exdir = dirname(dest))
-# }
-# 
-# utils::unzip(zipfile = dest, exdir = dirname("./Data/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip"))
-# 
-# # Ensure the zip file path is correct
-# zipfile <- "./Data/World Bank project/WorldBank_GeocodedResearchRelease_Level1_v1.4.2.zip"
-# if (!file.exists(zipfile)) {
-#   stop("The zip file does not exist at the specified path.")
-# }
-# 
-# # Destination directory for unzipping
-# exdir <- "./Data/World Bank project"
-# 
-# # Try using the utils::unzip function
-# tryCatch({
-#   utils::unzip(zipfile = zipfile, exdir = exdir)
-# }, warning = function(w) {
-#   message("Warning in utils::unzip: ", conditionMessage(w))
-# }, error = function(e) {
-#   message("Error in utils::unzip: ", conditionMessage(e))
-#   # Fallback to using the zip package
-#   install.packages("zip")
-#   library(zip)
-#   zip::unzip(zipfile = zipfile, exdir = exdir)
-# })
-
-```
 
 # Geography of country subjects
-country codes are c("AFG", "BGD", "BTN", "IND", "NPL", "PAK", "LKA")
+country codes are c("AFG", "BGD", "BTN", "IND", "NPL", "PAK", "LKA") with the country names are c("Afghanistan", "Bangladesh", "Bhutan", "India )
 second run: only run AFG, BGD, IND, NPL and PAK, BTN and LKR does not have enough data
+to download data for each country, replace the line 35 and line 36 with the according country name and code
 ```{r pressure, echo = F}
 country_code_3_letter <- "LKA"
 country_name <- c("Sri Lanka")
@@ -281,9 +214,8 @@ By investigating the data, we can see that most the of the lending instrument is
 
 
 ### Visualization
+Visualize the evolution of GDP, net development assistance, and the aid to GDP ratio for India
 ```{r}
-
-# Visualize the evolution of GDP, net development assistance, and the aid to GDP ratio for India
 
 # visualize the graps for India, Bangladesh, Cambodia, China, Laos, Myanmar, Pakistan, Sri Lanka, Thailand, Vietnam, and South Korea
 # c("IND", "VNM", "CHN", "MMR", "BGD", "KHM", "LAO", "PAK", "LKA", "THA", "KOR")
@@ -687,70 +619,7 @@ aid_gdp_ratio_india_graph <-  ggplot(aid_gdp_ratio_wb %>% filter(country_code %i
 
 fdi_inflow_gdp_ratio_india_graph
 ```
-## Test
-```{r}
-########
-# # Initialize a list to hold project IDs without docty values
-# projects_without_docty <- list()
-# 
-# # Loop through each project in all_documents
-# for (project_id in names(all_documents)) {
-#   project_docs <- all_documents[[project_id]]$documents
-#   
-#   # Check if project_docs is not NULL and contains documents
-#   if (!is.null(project_docs) && length(project_docs) > 0) {
-#     # Initialize a vector to hold document IDs without docty
-#     missing_docty_docs <- character(0)
-#     
-#     # Loop through each document in project_docs
-#     for (doc_id in names(project_docs)) {
-#       # Only consider document IDs that start with "D"
-#       if (grepl("^D", doc_id)) {
-#         # Check if 'docty' is NULL
-#         if (is.null(project_docs[[doc_id]]$docty)) {
-#           # Add the document ID to the vector
-#           missing_docty_docs <- c(missing_docty_docs, doc_id)
-#         }
-#       }
-#     }
-#     
-#     # If there are any documents without docty, store the project ID and the document IDs
-#     if (length(missing_docty_docs) > 0) {
-#       projects_without_docty[[project_id]] <- missing_docty_docs
-#     }
-#   }
-# }
-# 
-# # Display the projects without docty values
-# projects_without_docty
-# 
-# filtered_docs_test <- all_documents$P124041$documents
-# 
-# # count how many document in the filtered_all_documents
-# count_doc <- 0
-# for (project_id in names(filtered_all_documents)) {
-#   count_doc <- count_doc + length(filtered_all_documents[[project_id]]$documents)
-# }
-# count_doc
-# 
-# # 220 is the correct 
-# 
-# # how many unique project_id in flattened_document_df
-# length(unique(flattened_document_df$project_id))
-# 
-# # what are the difference of project_id in flattened_document_df and flattened_document_df_filtered
-# setdiff(unique(flattened_document_df$project_id), unique(flattened_document_df_filtered$project_id))
-# 
-# # how many NA in the total_disbursements of projects_wb_india_test
-# sum(is.na(projects_wb_india_manipulated$total_disbursements))
-# 
-# sum(is.na(projects_wb_india$total_disbursements))
-# 
-# # check the type of project of the project_id with na value in total_disbursements of projects_wb_india
-# na_disbur_project_type <- projects_wb_india_manipulated%>%
-#   dplyr::filter(is.na(total_disbursements)) %>%
-#   dplyr::select(project_id, ad_sector_codes, total_commitments, total_disbursements)
-```
+
 
 # Conflict and other datas
 Here we take a look at different conflict data, at the moment I reason myself that corruption is difficult to quantify. We often go into gray area of the economy. People often are not willing to talk about it. The process and reality of corruption is complex to demystify, what is the incentive of people in different sides participating to the corruption. In total, society as a whole losts because of corruption (in term of social welfare)/. From what I research myself from the literature review of the paper of Banerjee, well it's from the point of view of principal agent model. Difficult to extract data of corruption. Even though there are several indexes for corruption, but they are more suitable for cross-country estimation than a study of a country of it own. So we can use the conflict data as a proxy for the potential presence of corruption. The data on the conflict is factual, reported based on what happens

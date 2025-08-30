@@ -563,154 +563,6 @@ https://sedac.ciesin.columbia.edu/data/set/sdp-downscaled-gdp-a1a2b1b2-1990-2100
 chatgpt link for it: https://chatgpt.com/share/673b11c4-c554-8011-8c64-51a1bdf0b7a2
 
 we don't have anything GDP for AFG before 2000, so we need to extrapolate the GDP data for AFG from 1989 to 1999
-### based on gdp_grid_df
-```{r}
-# # Load necessary libraries
-# library(dplyr)
-# 
-# # Load country GDP data
-# 
-# # Load country GDP data
-# country_gdp_proj_b2 <- readxl::read_xls("./Data/data-raw/gdp/natl-gdp-proj-b2.xls", col_names = T)
-# 
-# # pivot the country_gdp_data to long format
-# # First, convert all column names to lower case and replace spaces with underscores
-# names(country_gdp_proj_b2) <- tolower(gsub(" ", "_", names(country_gdp_proj_b2)))
-# 
-# # Define the years columns you want to pivot
-# years <- c("1990", "1995", "2000", "2005", "2010", "2015", "2020", "2025", "2030", "2035", "2040", "2045", "2050", "2055", "2060", "2065", "2070", "2075", "2080", "2085", "2090", "2095", "2100")
-# 
-# # Pivot the data to long format
-# country_gdp_data_long <- country_gdp_proj_b2 %>%
-#   # Select the columns we need
-#   dplyr::select(un_code, name, all_of(years)) %>%
-#   # Rename 'un_code' to 'country_un_code' and 'name' to 'country_name'
-#   rename(country_un_code = un_code, country_name = name) %>%
-#   # Pivot the years to long format
-#   pivot_longer(
-#     cols = all_of(years),
-#     names_to = "year",
-#     values_to = "gdp"
-#   ) %>%
-#   # Convert year to integer
-#   mutate(year = as.integer(year),
-#          country_un_code = as.factor(country_un_code))
-# 
-# 
-# # Step 1: Filter the data for the chosen country and calculate the growth rates
-# country_gdp_data <- country_gdp_data_long %>%
-#   filter(country_un_code == country_code_2_number,
-#          year <= 2020) %>%
-#   arrange(year) %>%
-#   mutate(growth_rate = c(NA, diff(gdp) / head(gdp, -1)))  # Align diff(gdp) with previous year's GDP
-# 
-# 
-# 
-# # Step 1: Calculate annual growth rates from the 5-year growth rates
-# country_gdp_data <- country_gdp_data %>%
-#   arrange(year) %>%
-#   mutate(
-#     annual_growth_rate = ifelse(
-#       !is.na(growth_rate),
-#       (1 + growth_rate)^(1/5) - 1,  # Convert 5-year growth rate to annual rate
-#       NA
-#     )
-#   )
-# 
-# # Step 2: Interpolate annual growth rates for missing years
-# # Create a complete sequence of years from 1989 to 2020
-# all_years <- data.frame(year = 1989:2020)
-# 
-# # Merge with country GDP data
-# country_gdp_full <- all_years %>%
-#   left_join(country_gdp_data, by = "year") %>%
-#   mutate(
-#     # Interpolate missing annual growth rates, including years before 1995
-#     annual_growth_rate = zoo::na.approx(
-#       annual_growth_rate, 
-#       x = year, 
-#       na.rm = FALSE,  # Keep NA values for leading/trailing missing values
-#       rule = 2        # Linear extrapolation for leading/trailing NAs
-#     )
-#   )
-# 
-# country_projected_growth <- country_gdp_full %>%
-#   dplyr::select(year, annual_growth_rate) %>%
-#   rename(growth_rate = annual_growth_rate)
-# 
-# # # WB growth rate
-# # country_gdp_full <- real_growth %>% 
-# #   dplyr::select(year, growth_rate) %>%
-# #   dplyr::filter(year >= 1989 & year <= 2020)
-# 
-# # Step 3: Prepare a dataframe for extrapolated grid GDP
-# years_to_extrapolate <- 1989:2020
-# extrapolated_gdp_grid <- expand.grid(grid_id = gdp_grid_df$grid_id, year = years_to_extrapolate)
-# 
-# # Adjust grids with gdp_1990 == 0
-# adjusted_gdp_grid <- gdp_grid_df %>%
-#   mutate(
-#     gdp_1990 = ifelse(gdp_1990 == 0, 1e-6, gdp_1990),  # Replace 0 with a small value
-#     start_year = ifelse(gdp_1990 == 1e-6, 1991, 1989)  # Assume economic activity starts at least in 1989
-#   )
-# 
-# # Function to calculate CAGR (compound annual growth rate)
-# calculate_cagr <- function(gdp_start, gdp_end, years) {
-#   if (gdp_start == 0 || gdp_end == 0) return(NA)  # Avoid invalid calculations
-#   return((gdp_end / gdp_start)^(1 / years) - 1)
-# }
-# 
-# # Create an empty data frame for extrapolated GDP values
-# extrapolated_gdp_grid <- data.frame()
-# 
-# # Iterate over each grid and extrapolate GDP values
-# for (i in 1:nrow(adjusted_gdp_grid)) {
-#   grid_id <- adjusted_gdp_grid$grid_id[i]
-#   gdp_start <- adjusted_gdp_grid$gdp_1990[i]
-#   gdp_end <- adjusted_gdp_grid$gdp_2025[i]
-#   start_year <- adjusted_gdp_grid$start_year[i]
-# 
-#   # Calculate CAGR
-#   cagr <- calculate_cagr(gdp_start, gdp_end, 2025 - 1989)
-# 
-#   # Extrapolate GDP values for all years
-#   temp_df <- data.frame(
-#     grid_id = grid_id,
-#     year = 1989:2025,
-#     gdp_value = gdp_start * (1 + cagr)^(1989:2025 - 1989)
-#   )
-#   extrapolated_gdp_grid <- rbind(extrapolated_gdp_grid, temp_df)
-# }
-# 
-# # Identify grids where both 1990 and 2025 GDP values are 0
-# zero_gdp_grids <- gdp_grid_df %>% 
-#   filter(gdp_1990 == 0 & gdp_2025 == 0) %>%
-#   pull(grid_id)
-# 
-# # Replace all gdp_value to 0 for those grids and all years (1989 to 2024)
-# extrapolated_gdp_grid$gdp_value[extrapolated_gdp_grid$grid_id %in% zero_gdp_grids] <- 0
-# 
-# # change the name
-# extrapolated_gdp_grid <- extrapolated_gdp_grid %>%
-#   dplyr::rename(gdp = gdp_value)
-# 
-# 
-# # Verify the change
-# # Summarize the extrapolated GDP grid
-# summary(extrapolated_gdp_grid)
-# 
-# # write_rds(extrapolated_gdp_grid, "./Data/data-processed/extrapolated_gdp_grid.rds")
-# 
-# extrapolated_gdp_grid_until_2020 <- extrapolated_gdp_grid %>%
-#   filter(year <= 2020)
-# # write_rds(extrapolated_gdp_grid_until_2020, "./Data/data-processed/extrapolated_gdp_grid_until_2020.rds")
-# 
-# 
-# # View a few rows of the extrapolated data
-# head(extrapolated_gdp_grid_until_2020)
-
-```
-
 
 ### based on national annual growth rate
 ```{r}
@@ -866,6 +718,7 @@ head(extrapolated_gdp_grid_until_2020)
 ```
 
 # Agriculture production
+this task is abandoned, the explanation is down in the cropland section
 ```{r}
 # 
 # # Folder containing the tif files
@@ -1553,50 +1406,51 @@ ggplot() +
         panel.grid = element_blank())  # Removes grid lines for cleaner map
 ```
 ###check
+This code is not meant to be run by reviewer
 ```{r}
-# Step 1: Perform a spatial join to find which water stress category each project falls into
-# This assumes that locations_wb_country_sf is a point layer and grid_intersect_bws_test_sf is a polygon layer
-project_distribution <- st_join(locations_wb_country_sf, grid_intersect_bws_test_sf, join = st_intersects) %>%
-  # Step 2: Count the number of projects in each water stress category
-  count(bws_cat) %>%
-  # Step 3: Rename the column for clarity
-  rename(project_locations_count = n) %>%
-  # Step 4: Arrange by bws_cat for a logical order
-  arrange(bws_cat) %>%
-  st_drop_geometry() %>%
-  mutate(percentage = project_locations_count/sum(project_locations_count)  * 100)
-
-# Step 5: Display or further process the result
-print(project_distribution)
-
-#####################################################
-library(dplyr)
-library(tidyr)
-library(sf)
-library(stringr)
-
-# Assuming locations_wb_country_sf has project locations with ad_sector_codes
-# and grid_intersect_bws_test_sf has water stress categories
-
-# Step 1: Split the sector codes
-sector_distribution <- locations_wb_country_sf %>%
-  mutate(ad_sector_codes = str_split(ad_sector_codes, "\\|")) %>%
-  unnest(ad_sector_codes) %>%
-  
-  # Step 2: Perform spatial join with water stress data
-  st_join(grid_intersect_bws_test_sf, join = st_intersects) %>%
-  
-  # Step 3: Count sectors by water stress category
-  count(ad_sector_codes, bws_cat) %>%
-  
-  # Step 4: Join with sector names for clarity
-  left_join(wb_sector_trans_crosswalk, by = c("ad_sector_codes" = "ad_sector_codes")) %>%
-  
-  # Step 5: Arrange for better readability
-  arrange(bws_cat, desc(n))
-
-# Step 6: Display or further process the result
-print(sector_distribution)
+# # Step 1: Perform a spatial join to find which water stress category each project falls into
+# # This assumes that locations_wb_country_sf is a point layer and grid_intersect_bws_test_sf is a polygon layer
+# project_distribution <- st_join(locations_wb_country_sf, grid_intersect_bws_test_sf, join = st_intersects) %>%
+#   # Step 2: Count the number of projects in each water stress category
+#   count(bws_cat) %>%
+#   # Step 3: Rename the column for clarity
+#   rename(project_locations_count = n) %>%
+#   # Step 4: Arrange by bws_cat for a logical order
+#   arrange(bws_cat) %>%
+#   st_drop_geometry() %>%
+#   mutate(percentage = project_locations_count/sum(project_locations_count)  * 100)
+# 
+# # Step 5: Display or further process the result
+# print(project_distribution)
+# 
+# #####################################################
+# library(dplyr)
+# library(tidyr)
+# library(sf)
+# library(stringr)
+# 
+# # Assuming locations_wb_country_sf has project locations with ad_sector_codes
+# # and grid_intersect_bws_test_sf has water stress categories
+# 
+# # Step 1: Split the sector codes
+# sector_distribution <- locations_wb_country_sf %>%
+#   mutate(ad_sector_codes = str_split(ad_sector_codes, "\\|")) %>%
+#   unnest(ad_sector_codes) %>%
+#   
+#   # Step 2: Perform spatial join with water stress data
+#   st_join(grid_intersect_bws_test_sf, join = st_intersects) %>%
+#   
+#   # Step 3: Count sectors by water stress category
+#   count(ad_sector_codes, bws_cat) %>%
+#   
+#   # Step 4: Join with sector names for clarity
+#   left_join(wb_sector_trans_crosswalk, by = c("ad_sector_codes" = "ad_sector_codes")) %>%
+#   
+#   # Step 5: Arrange for better readability
+#   arrange(bws_cat, desc(n))
+# 
+# # Step 6: Display or further process the result
+# print(sector_distribution)
 ```
 the NA value are also in the islands only, we don't need to fix it
 
@@ -1723,6 +1577,7 @@ grid_final_df_filtered <- grid_final_df_filtered %>%
 ```
 
 ## Check
+This code is not meant to be run by the reviewer
 ```{r}
 # # Check for infinite values across all columns in grid_final_df
 # infinite_summary <- grid_final_df %>%
@@ -1892,40 +1747,6 @@ Comment from this graph: as you can see conflicts seem not to concentrate from t
 Of course the conflicts are based on other factors as well, like preferential treatment of one group compared to other group, language different, 
 
 
-## Ethnic and Linguistic data
-The datas are 
-- ethnic_geo_ref_2010_eth (geo-referencing of Ethnic groups) 8969 obs - it is not filtered to country yet, this seems to be unusable
-  the ethnic group is coded based on one of the six settlement pattern 
-- political_ethnic_country_epr_eth (ethnic group with relevant political power in country) 280 obs, maybe using the original data is a good idea (geo_ethnic_power_geoepr_eth)
-- geo_ethnic_power_geoepr_country_eth (76 obs) (with polygon reference)
-- conflict_ethnic_acd2epr_country_eth (Conflict btw Ethnic) - only 33 obs -> not really interesting
-- Ethno-Linguistic, religious and 
-
-The second and the third data go along together
-
-Faster example of visualization: https://growup.ethz.ch/pfe/country
-The data now is political_ethnic_country_epr_eth_filtered
-
-```{r}
-# # Filter out rows 1, 2, and 21
-# filtered_data <- political_ethnic_country_epr_eth_filtered[-c(16, 20, 21), ]
-# 
-# # Create the plot
-# plot_country_single_ethnic <- ggplot() +   
-#   geom_sf(data = grid_intersect_bws_test, color = "black", size = 0.2, fill = NA) +
-#   geom_sf(data = filtered_data, color = "red", size = 0.5, fill = NA) + # Highlight in red or any desired color
-#   geom_sf_text(data = filtered_data, aes(label = group), size = 3, color = "blue") + # Add labels
-#   theme_minimal() +
-#   labs(title = "Map of country Highlighting Specific Ethnic Power Rows (Excluding Rows 1, 2, 21)",
-#        x = "Longitude",
-#        y = "Latitude")
-# 
-# # Display the plot
-# plot_country_single_ethnic
-# 
-# # for the visualization
-```
-
 ## Project and grid
 ```{r}
 # # visualize the project from level_1a_wb_country_sf and grid from country_sf together, just put country_sf as background and all the project location as dot ontop of it
@@ -1945,10 +1766,6 @@ The data now is political_ethnic_country_epr_eth_filtered
 # 
 # plot_country_project_grid;plot_country_project_grid_locations_wb
 ```
-
-## Leaflet
-DIY later
-
 
 # Saving the environement
 ```{r}
